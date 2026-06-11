@@ -9,7 +9,6 @@
   --code-bg: #f6f8fa;  --code-fg: #1f2328;
   --quote-border: #d0d7de;  --table-head-bg: #f1f3f5;  --table-zebra: #f6f8fa;
   --editing-bg: #fff8c5;  /* sombreado del bloque en edicion */
-  --maxw: 860px;
   /* fuentes: el editor usa la MISMA de lectura (sans); solo el codigo es mono.
      Familia Ubuntu por su antialiasing/hinting excelente (Dalton Maag). */
   --font-body: "Ubuntu", "Ubuntu Sans", system-ui, "Noto Sans", sans-serif;
@@ -29,11 +28,10 @@ body {
 }
 
 .markdown-body {
-  max-width: var(--maxw);
+  max-width: none;  /* siempre ancho completo */
   margin: 0 auto;
   padding: 3.2rem 2.4rem 6rem;
 }
-body.full-width .markdown-body { max-width: none; }
 
 /* RENDIMIENTO: el resaltado de codigo va en una cola que no bloquea (ver
    index.html), asi que el codigo NO necesita content-visibility -- en WebKitGTK
@@ -110,8 +108,7 @@ body.full-width .markdown-body { max-width: none; }
 .markdown-body .mermaid svg { max-width: 100%; height: auto; }
 
 /* === Modo edición (CodeMirror 6 live-preview) ============================ */
-#editor { max-width: var(--maxw); margin: 0 auto; padding: 2rem 2.4rem 6rem; }
-body.full-width #editor { max-width: none; }
+#editor { max-width: none; margin: 0 auto; padding: 2rem 2.4rem 6rem; }
 .cm-editor { font-size: 1rem; background: transparent; }
 /* el editor usa la fuente de LECTURA (sans), igual que el visor; el codigo
    dentro de los bloques renderizados sigue saliendo mono por .markdown-body */
@@ -130,26 +127,115 @@ body.full-width #editor { max-width: none; }
 /* item de lista (no el primero) en fuente: replica el margin .25em de `li + li`
    del visor para que el interlineado de la lista coincida con el modo lectura */
 .cm-editor .cm-li-gap { padding-top: .25em; }
+/* encabezado en edicion: la fuente (`# Titulo`) conserva el tamano del nivel */
+.cm-editor .cm-edit-h1, .cm-editor .cm-edit-h2, .cm-editor .cm-edit-h3,
+.cm-editor .cm-edit-h4, .cm-editor .cm-edit-h5, .cm-editor .cm-edit-h6 { font-weight: 700; line-height: 1.25; }
+.cm-editor .cm-edit-h1 { font-size: 2em; }
+.cm-editor .cm-edit-h2 { font-size: 1.5em; }
+.cm-editor .cm-edit-h3 { font-size: 1.25em; }
+.cm-editor .cm-edit-h4 { font-size: 1em; }
+.cm-editor .cm-edit-h5 { font-size: .9em; }
+.cm-editor .cm-edit-h6 { font-size: .85em; color: var(--muted); }
 #btn-edit.active { background: var(--link); color: #fff; border-color: var(--link); }
 
-/* === Índice / árbol del documento (panel izquierdo) ====================== */
-:root { --toc-w: 270px; }
-/* cuando el panel está abierto, el contenido se desplaza (no se tapa) */
-body.toc-open { padding-left: var(--toc-w); }
-#toc-panel { display: none; }
-body.toc-open #toc-panel {
+/* === Título de sección fijado (chincheta) ================================ */
+/* barra fija arriba con el título de la sección actual mientras se hace scroll
+   (emula el sticky de un header de tabla; el position:sticky nativo no vale aquí
+   porque sin contenedores de sección los encabezados se acumularían) */
+#pin-bar {
+  display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 30;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+  box-shadow: 0 2px 6px rgba(0,0,0,.07);
+  padding: .4rem 2.4rem .5rem; color: var(--fg);
+}
+body.pin-on #pin-bar.show { display: block; }
+body.side-open #pin-bar { left: var(--toc-w); }
+/* una línea por nivel de la jerarquía, cada uno en su tamaño de encabezado */
+#pin-bar .pin-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; font-weight: 700; line-height: 1.25; }
+#pin-bar .pin-row:hover { color: var(--link); }
+#pin-bar .pin-h1 { font-size: 2em; }
+#pin-bar .pin-h2 { font-size: 1.5em; }
+#pin-bar .pin-h3 { font-size: 1.25em; }
+#pin-bar .pin-h4 { font-size: 1em; }
+#pin-bar .pin-h5 { font-size: .9em; }
+#pin-bar .pin-h6 { font-size: .85em; color: var(--muted); }
+
+/* === Panel lateral: buscador (arriba) + índice (abajo) =================== */
+:root { --toc-w: 270px; --side-split: 240px; }
+/* el panel se muestra si hay buscador o índice; desplaza el contenido (no tapa) */
+body.side-open { padding-left: var(--toc-w); }
+#side-panel { display: none; }
+body.side-open #side-panel {
   display: flex; flex-direction: column;
   position: fixed; left: 0; top: 0; bottom: 0; width: var(--toc-w);
   background: var(--alt-bg); border-right: 1px solid var(--border);
   z-index: 45; box-shadow: 0 0 12px rgba(0,0,0,.06);
 }
-#toc-head {
-  display: flex; align-items: center; gap: .4rem;
-  font-weight: 700; font-size: 12px; letter-spacing: .04em; text-transform: uppercase;
-  color: var(--muted); padding: .65rem .85rem; border-bottom: 1px solid var(--border);
-  flex: 0 0 auto;
+/* secciones */
+#search-sec, #toc-sec { display: none; flex-direction: column; min-height: 0; }
+body.search-open #search-sec { display: flex; }
+body.toc-open #toc-sec { display: flex; }
+/* reparto vertical: solo uno -> ocupa todo; ambos -> buscador altura var, resto indice */
+body.search-open:not(.toc-open) #search-sec { flex: 1 1 auto; }
+body.toc-open:not(.search-open) #toc-sec { flex: 1 1 auto; }
+body.search-open.toc-open #search-sec { flex: 0 0 var(--side-split); }
+body.search-open.toc-open #toc-sec { flex: 1 1 auto; }
+/* divisor vertical entre secciones (solo con ambas activas) */
+#side-vdivider { display: none; }
+body.search-open.toc-open #side-vdivider {
+  display: block; flex: 0 0 auto; height: 7px; cursor: row-resize;
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--alt-bg);
 }
-#toc-list { flex: 1 1 auto; overflow: auto; padding: .35rem 0 1rem; }
+#side-vdivider:hover { background: rgba(9,105,218,.18); }
+/* cabecera de seccion (titulo o campo) */
+.side-head {
+  flex: 0 0 auto; padding: .55rem .7rem; border-bottom: 1px solid var(--border);
+  font-weight: 700; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
+}
+.side-body { flex: 1 1 auto; overflow: auto; min-height: 0; }
+/* campo de busqueda */
+#search-input {
+  width: 100%; box-sizing: border-box; padding: .35em .55em; font: inherit; font-size: 13px;
+  text-transform: none; letter-spacing: normal; font-weight: 400; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 6px;
+}
+#search-input:focus { outline: none; border-color: var(--link); }
+/* resultados de busqueda */
+#search-results { padding: .25rem 0 .6rem; }
+#search-results .sr { display: flex; gap: .55em; padding: .16em .7rem; cursor: pointer; font-size: 12.5px; line-height: 1.4; }
+#search-results .sr:hover { background: rgba(127,127,127,.12); }
+#search-results .sr.active { background: rgba(9,105,218,.12); }
+/* ancho del nº de línea = cifras del mayor nº de los resultados (--ln-w), a la derecha */
+#search-results .sr .ln { flex: 0 0 auto; width: var(--ln-w, 1ch); text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* coincidencia centrada: antes|match|después; bf y af con igual ancho (flex 1 1 0)
+   centran el match, y cada lado recorta con … segun el ancho (responsive, sin JS) */
+#search-results .sr .tx { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; overflow: hidden; }
+/* max-width:max-content => un lado corto (coincidencia al inicio/fin de línea) no
+   ocupa su mitad: cede el espacio al otro lado, que muestra más texto. Si ambos
+   son largos, flex reparte igual y la coincidencia queda centrada. */
+#search-results .sr .bf, #search-results .sr .af { flex: 1 1 0; min-width: 0; max-width: max-content; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#search-results .sr .bf { direction: rtl; }   /* … a la izquierda (el texto latino se sigue leyendo LTR) */
+#search-results .sr .tx > mark { flex: 0 0 auto; white-space: pre; }
+#search-results .sr mark, #content mark.search-hit, .cm-mdblock mark.search-hit {
+  background: #fde047; color: inherit; border-radius: 2px; padding: 0 .5px;
+}
+.search-info { color: var(--muted); font-style: italic; padding: .5rem .7rem; font-size: 12.5px; }
+/* resaltado de busqueda en el bloque en edicion (mark de CodeMirror) */
+.cm-search-hit { background: #fde047; border-radius: 2px; }
+/* halo breve y discreto que decrece ligeramente hasta el recuadro de la coincidencia
+   (mismo amarillo del resaltado); solo para localizarla con la vista al navegar */
+.mdlive-halo {
+  position: fixed; pointer-events: none; z-index: 60;
+  border-radius: 3px; background: #fde047;
+  transform-origin: center;
+  animation: mdlive-halo .35s ease-out forwards;
+}
+@keyframes mdlive-halo {
+  0%   { transform: scale(1.9); opacity: .6; }
+  100% { transform: scale(1);   opacity: 0; }
+}
+/* === Índice ============================================================== */
+#toc-list { padding: .35rem 0 1rem; }
 #toc-list .toc-row { display: flex; align-items: flex-start; line-height: 1.35; }
 #toc-list .toc-tw {
   flex: 0 0 1.1em; width: 1.1em; text-align: center; cursor: default;

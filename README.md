@@ -9,6 +9,8 @@ Pensado para abrir un `.md` y verlo actualizarse al vuelo mientras lo editas con
 - **Live reload**: si el `.md` cambia en disco, la vista se refresca al instante (también recarga `style.css` e `index.html` en caliente).
 - **Edición WYSIWYG por bloques** (CodeMirror 6): todo el documento se ve renderizado salvo el bloque donde está el cursor, que se muestra como fuente y se resalta. Guarda directo al fichero.
 - **Índice/árbol del documento**: panel lateral con la jerarquía de encabezados, colapsable, redimensionable y con *scroll-spy* (resalta el apartado visible), tanto en visor como en editor.
+- **Buscador** (`Ctrl`+`F`): comparte el panel lateral con el índice, resalta las coincidencias en visor y editor y las lista con su número de línea; `Ctrl`+`N`/`Ctrl`+`P` navegan por todas las ocurrencias con un breve halo de localización.
+- **Chincheta** (`p`): fija en la parte superior la jerarquía de títulos de la sección visible (sticky), como la cabecera de una tabla.
 - **Rendimiento en ficheros grandes**: resaltado de código y diagramas perezosos (IntersectionObserver), scroll directo.
 - **Offline**: todas las dependencias están vendorizadas en `vendor/` (markdown-it, highlight.js, mermaid, CodeMirror).
 - **Mermaid** y resaltado de sintaxis integrados.
@@ -37,8 +39,10 @@ sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1
 | Tecla | Acción |
 |-------|--------|
 | `t` | Mostrar/ocultar el índice del documento |
+| `p` | Fijar (chincheta) los títulos de sección al hacer scroll |
+| `Ctrl`+`F` | Buscador |
+| `Ctrl`+`N` / `Ctrl`+`P` | Ir a la siguiente / anterior coincidencia |
 | `e` | Entrar/salir del modo edición |
-| `w` | Ancho de lectura / ancho completo |
 | `Ctrl`+rueda | Zoom de solo texto |
 | `Ctrl`+`0` | Restablecer el zoom |
 | `Esc` | Salir del modo edición |

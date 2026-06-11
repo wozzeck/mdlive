@@ -16,13 +16,22 @@
 <body>
 <div id="toolbar">
   <button id="btn-toc" title="Índice del documento (tecla t)">&#9776;</button>
+  <button id="btn-pin" title="Fijar el título de la sección al hacer scroll (tecla p)">&#128204;</button>
+  <button id="btn-search" title="Buscar (Ctrl+F)">&#128269;</button>
   <button id="btn-edit" title="Modo edición (tecla e)">&#9999;&#65039;</button>
-  <button id="btn-width" title="Ancho lectura / completo (tecla w)">&#8596;</button>
 </div>
-<aside id="toc-panel" aria-hidden="true">
-  <div id="toc-head"><span>Índice</span></div>
-  <nav id="toc-list"></nav>
-  <div id="toc-resizer" title="Arrastrar para redimensionar"></div>
+<div id="pin-bar" title="Ir a la sección"></div>
+<aside id="side-panel" aria-hidden="true">
+  <section id="search-sec">
+    <div class="side-head"><input id="search-input" type="search" placeholder="Buscar…" autocomplete="off" spellcheck="false"></div>
+    <div id="search-results" class="side-body"></div>
+  </section>
+  <div id="side-vdivider" title="Arrastrar para redimensionar"></div>
+  <section id="toc-sec">
+    <div class="side-head">Índice</div>
+    <nav id="toc-list" class="side-body"></nav>
+  </section>
+  <div id="toc-resizer" title="Arrastrar para redimensionar el ancho"></div>
 </aside>
 <article id="content" class="markdown-body"></article>
 <div id="editor" style="display:none"></div>
@@ -44,6 +53,8 @@
   let editMode = false;
   let docSource = '';
   let cmView = null;
+  let searchQuery = '';        // término de búsqueda activo (vacío = sin búsqueda)
+  let setSearchEffect = null;  // StateEffect de CM para refrescar resaltado (se define al crear el editor)
 
   function initMermaid() {
     if (!window.mermaid) return;
@@ -109,7 +120,9 @@
     extractMermaid(content);
     observeLazy(content);
     sc.scrollTop = ratio * Math.max(1, sc.scrollHeight - sc.clientHeight);
-    if (tocOpen()) { buildToc(); requestAnimationFrame(updateSpy); }
+    if (searchQuery) highlightInElement(content, searchQuery);
+    if (tocOpen()) buildToc(); else if (pinOn()) refreshHeadings();
+    if (tocOpen() || pinOn()) requestAnimationFrame(updateSpy);
   }
   let lastFetched = null;
   async function refreshFromDisk(force) {
@@ -145,13 +158,14 @@
     const { Decoration, WidgetType, EditorView } = CM.view;
     const { RangeSetBuilder, StateField } = CM.state;
     class MdWidget extends WidgetType {
-      constructor(text, from) { super(); this.text = text; this.from = from; }
-      eq(o) { return o.text === this.text && o.from === this.from; }
+      constructor(text, from, q) { super(); this.text = text; this.from = from; this.q = q; }
+      eq(o) { return o.text === this.text && o.from === this.from && o.q === this.q; }
       toDOM(view) {
         const div = document.createElement('div');
         div.className = 'cm-mdblock markdown-body';
         div.innerHTML = md.render(this.text) || '<p class="mdblock-empty">vacío</p>';
         decorateSync(div);
+        if (this.q) highlightInElement(div, this.q);  // resalta ocurrencias en el bloque renderizado
         div.addEventListener('mousedown', (e) => {
           e.preventDefault();
           view.dispatch({ selection: { anchor: this.from } });
@@ -165,7 +179,10 @@
     // item de lista que NO es el primero: replica el margin-top .25em de `li + li`
     // del render, para que el interlineado de la lista en fuente coincida con el visor
     const editingLineGap = Decoration.line({ class: 'cm-editing cm-li-gap' });
+    // encabezado ATX en edicion: se muestra la fuente (`# Titulo`) con el tamano del nivel
+    const editingHead = [1, 2, 3, 4, 5, 6].map((n) => Decoration.line({ class: 'cm-editing cm-edit-h' + n }));
     const ITEM_RE = /^\s*([-*+]|\d+[.)])\s/;
+    const HEAD_RE = /^(#{1,6})\s/;
     function build(state) {
       const b = new RangeSetBuilder();
       const sel = state.selection.main;
@@ -178,7 +195,9 @@
           let ln = doc.lineAt(blk.from), prevItem = false;
           for (;;) {
             const item = ITEM_RE.test(ln.text);
-            b.add(ln.from, ln.from, (item && prevItem) ? editingLineGap : editingLine);
+            const hm = ln.text.match(HEAD_RE);
+            const deco = hm ? editingHead[hm[1].length - 1] : ((item && prevItem) ? editingLineGap : editingLine);
+            b.add(ln.from, ln.from, deco);
             prevItem = item;
             if (ln.to >= blk.to) break;
             ln = doc.line(ln.number + 1);
@@ -190,22 +209,47 @@
         // El espaciado lo dan los margenes de .markdown-body -> identico al visor.
         const next = blocks[i + 1];
         const to = next ? doc.lineAt(next.from - 1).to : doc.length;
-        b.add(blk.from, to, Decoration.replace({ widget: new MdWidget(blk.text, blk.from), block: true }));
+        b.add(blk.from, to, Decoration.replace({ widget: new MdWidget(blk.text, blk.from, searchQuery), block: true }));
       }
       return b.finish();
     }
+    // recompute tambien al cambiar la busqueda (los widgets se re-renderizan con el nuevo q)
+    const searchChanged = (tr) => { for (const e of tr.effects) if (setSearchEffect && e.is(setSearchEffect)) return true; return false; };
     // Las decoraciones de BLOQUE deben venir de un StateField (no de un ViewPlugin).
     return StateField.define({
       create: (state) => build(state),
-      update: (value, tr) => (tr.docChanged || tr.selection) ? build(tr.state) : value,
+      update: (value, tr) => (tr.docChanged || tr.selection || searchChanged(tr)) ? build(tr.state) : value,
       provide: (f) => EditorView.decorations.from(f),
     });
   }
 
   function buildExtensions(CM) {
-    const { EditorView, keymap, drawSelection, highlightActiveLine } = CM.view;
+    const { EditorView, keymap, drawSelection, Decoration } = CM.view;
+    const { StateField, StateEffect, RangeSetBuilder } = CM.state;
     const { history, historyKeymap, defaultKeymap, indentWithTab } = CM.commands;
     const { syntaxHighlighting, defaultHighlightStyle } = CM.language;
+    if (!setSearchEffect) setSearchEffect = StateEffect.define();
+    // resaltado de ocurrencias en el TEXTO fuente (visible en el bloque en edición;
+    // en los bloques renderizados el resaltado lo pone highlightInElement en el widget)
+    const searchMark = Decoration.mark({ class: 'cm-search-hit' });
+    function buildSearchMarks(state) {
+      if (!searchQuery) return Decoration.none;
+      const b = new RangeSetBuilder();
+      const text = state.doc.toString().toLowerCase();
+      const q = searchQuery.toLowerCase();
+      let i = 0;
+      while ((i = text.indexOf(q, i)) !== -1) { b.add(i, i + q.length, searchMark); i += q.length; }
+      return b.finish();
+    }
+    const searchMarkField = StateField.define({
+      create: (state) => buildSearchMarks(state),
+      update(value, tr) {
+        let recompute = tr.docChanged;
+        for (const e of tr.effects) if (e.is(setSearchEffect)) recompute = true;
+        return recompute ? buildSearchMarks(tr.state) : value.map(tr.changes);
+      },
+      provide: (f) => EditorView.decorations.from(f),
+    });
     const saveOnChange = EditorView.updateListener.of((u) => {
       if (u.docChanged) { docSource = u.state.doc.toString(); lastFetched = docSource; scheduleSave(); }
     });
@@ -217,6 +261,7 @@
       CM.markdown(),
       syntaxHighlighting(defaultHighlightStyle),
       makeLivePreview(CM),
+      searchMarkField,
       saveOnChange,
       EditorView.theme({
         '&': { color: 'var(--fg)', backgroundColor: 'transparent' },
@@ -235,7 +280,8 @@
     cmView = new window.CM.view.EditorView({ doc: docSource, parent: editorHost, extensions: buildExtensions(window.CM) });
     cmView.scrollDOM.addEventListener('scroll', onAnyScroll, { passive: true });
     cmView.focus();
-    if (tocOpen()) { buildToc(); requestAnimationFrame(updateSpy); }
+    if (tocOpen()) buildToc(); else if (pinOn()) refreshHeadings();
+    if (tocOpen() || pinOn()) requestAnimationFrame(updateSpy);
   }
   function exitEdit() {
     if (cmView) { docSource = cmView.state.doc.toString(); lastFetched = docSource; saveNow(); cmView.destroy(); cmView = null; }
@@ -284,13 +330,6 @@
     const sc = document.scrollingElement, r = a.el.getBoundingClientRect();
     sc.scrollTop = (sc.scrollTop + r.top + a.frac * r.height) - window.innerHeight / 2;
   }
-  function toggleWidth() {
-    const a = findAnchor();
-    document.body.classList.toggle('full-width');
-    localStorage.setItem('mdlive-width', document.body.classList.contains('full-width') ? 'full' : 'reading');
-    restoreAnchor(a);
-  }
-  document.getElementById('btn-width').onclick = toggleWidth;
   let lastAnchor = null, scrollTick = false, resizeTick = false, spyTick = false;
   addEventListener('scroll', () => { if (scrollTick) return; scrollTick = true; requestAnimationFrame(() => { if (!editMode) lastAnchor = findAnchor(); updateSpy(); scrollTick = false; }); }, { passive: true });
   addEventListener('resize', () => { if (resizeTick) return; resizeTick = true; requestAnimationFrame(() => { if (!editMode) restoreAnchor(lastAnchor); resizeTick = false; }); });
@@ -311,25 +350,31 @@
   addEventListener('wheel', (e) => { if (!e.ctrlKey) return; e.preventDefault(); zPending += (e.deltaY < 0 ? 0.1 : -0.1); if (!zScheduled) { zScheduled = true; requestAnimationFrame(flushZoom); } }, { passive: false });
 
   addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); setSearch(true); return; }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'n' || e.key === 'N')) { e.preventDefault(); if (searchHits.length) gotoHit((searchCur + 1) % searchHits.length, false); return; }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); if (searchHits.length) gotoHit((searchCur - 1 + searchHits.length) % searchHits.length, false); return; }
     if ((e.ctrlKey || e.metaKey) && e.key === '0') { e.preventDefault(); zoom = 1; applyZoom(); return; }
     // dentro del editor CM, no robar teclas (salvo Escape para salir de edicion)
     if (editMode) { if (e.key === 'Escape') { e.preventDefault(); setEditMode(false); } return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName || '')) return;
     // preventDefault: si no, al entrar en edicion con 'e' la tecla se cuela en el editor
-    if (e.key === 'w') { e.preventDefault(); toggleWidth(); }
-    else if (e.key === 'e') { e.preventDefault(); setEditMode(true); }
+    if (e.key === 'e') { e.preventDefault(); setEditMode(true); }
     else if (e.key === 't') { e.preventDefault(); toggleToc(); }
+    else if (e.key === 'p') { e.preventDefault(); setPin(!pinOn()); }
   });
 
   // ===== Índice / árbol del documento =======================================
   const tocList = document.getElementById('toc-list');
   const btnToc = document.getElementById('btn-toc');
   const tocResizer = document.getElementById('toc-resizer');
+  const btnPin = document.getElementById('btn-pin');
+  const pinBar = document.getElementById('pin-bar');
   let headings = [];   // [{level, text, line}]
   let tocLinks = [];   // [{row, a}]
   const collapsed = new Set();
   let activeIdx = -1;
+  let pinIdx = -1;     // heading mostrado en la barra fija
 
   function tocOpen() { return document.body.classList.contains('toc-open'); }
   function plainText(s) {
@@ -422,31 +467,90 @@
       if (ar.top < pr.top + 4 || ar.bottom > pr.bottom - 4) a.scrollIntoView({ block: 'nearest' });
     }
   }
-  function updateSpy() {
-    if (!tocOpen() || !headings.length) return;
-    if (editMode && cmView) spyEdit(); else spyView();
-  }
-  function spyView() {
+  // coordenada top (viewport) de cada heading: por el DOM (visor) o coordsAtPos (editor)
+  function topsView() {
     const els = content.querySelectorAll('h1,h2,h3,h4,h5,h6');
     const lim = Math.min(els.length, headings.length);
-    let idx = 0;
-    for (let i = 0; i < lim; i++) { if (els[i].getBoundingClientRect().top <= 110) idx = i; else break; }
-    setActive(idx);
+    const t = [];
+    for (let i = 0; i < lim; i++) t.push(els[i].getBoundingClientRect().top);
+    return t;
   }
-  function spyEdit() {
-    const doc = cmView.state.doc;
-    let idx = 0;
+  function topsEdit() {
+    const doc = cmView.state.doc, t = [];
     for (let i = 0; i < headings.length; i++) {
       const pos = doc.line(Math.min(doc.lines, headings[i].line + 1)).from;
       const c = cmView.coordsAtPos(pos);
-      if (!c) continue;
-      if (c.top <= 130) idx = i; else break;
+      t.push(c ? c.top : null);
     }
-    setActive(idx);
+    return t;
   }
+  // último heading cuyo top ya pasó el umbral (para resaltar en el índice)
+  function lastBelow(tops, threshold) {
+    let idx = -1;
+    for (let i = 0; i < tops.length; i++) { if (tops[i] == null) continue; if (tops[i] <= threshold) idx = i; else break; }
+    return idx;
+  }
+  // altura aproximada de una fila de la barra según el nivel (para la pila sticky)
+  function pinRowH(level) {
+    const base = parseFloat(getComputedStyle(document.documentElement).fontSize) || 17;
+    return base * ([2, 1.5, 1.25, 1, .9, .85][level - 1] || 1) * 1.3;
+  }
+  // heading "anclado" como pila sticky: cada uno se ancla solo cuando su top baja hasta la
+  // altura de la barra de sus ANCESTROS; así el primer título no se ancla mientras es visible
+  function curHeadingFrom(tops) {
+    const pad = 8; const stack = []; let barH = pad, result = -1;
+    for (let i = 0; i < tops.length; i++) {
+      if (tops[i] == null) continue;
+      while (stack.length && headings[stack[stack.length - 1]].level >= headings[i].level) barH -= pinRowH(headings[stack.pop()].level);
+      if (tops[i] <= barH) { stack.push(i); barH += pinRowH(headings[i].level); result = i; }
+      else break;
+    }
+    return result;
+  }
+  function refreshHeadings() { headings = parseHeadings(docSource); }
+  function pinOn() { return document.body.classList.contains('pin-on'); }
+  function updatePinBar(idx) {
+    if (!pinOn() || idx < 0 || !headings[idx]) { pinBar.classList.remove('show'); pinIdx = -1; return; }
+    if (idx !== pinIdx) {
+      pinIdx = idx;
+      // cadena de ancestros (un heading por nivel) hasta el actual, incluido
+      const path = [];
+      let need = headings[idx].level;
+      for (let i = idx; i >= 0 && need >= 1; i--) {
+        if (headings[i].level <= need) { path.unshift(i); need = headings[i].level - 1; }
+      }
+      pinBar.innerHTML = '';
+      for (const j of path) {
+        const h = headings[j];
+        const row = document.createElement('div');
+        row.className = 'pin-row pin-h' + h.level;
+        row.textContent = h.text;
+        row.addEventListener('click', (e) => { e.stopPropagation(); gotoHeading(j); });
+        pinBar.appendChild(row);
+      }
+    }
+    pinBar.classList.add('show');
+  }
+  function updateSpy() {
+    if (!headings.length || (!tocOpen() && !pinOn())) return;
+    const inEdit = editMode && cmView;
+    const tops = inEdit ? topsEdit() : topsView();
+    if (tocOpen()) setActive(Math.max(0, lastBelow(tops, inEdit ? 130 : 110)));
+    if (pinOn()) updatePinBar(curHeadingFrom(tops));
+  }
+  function setPin(on) {
+    document.body.classList.toggle('pin-on', on);
+    btnPin.classList.toggle('active', on);
+    localStorage.setItem('mdlive-pin', on ? '1' : '0');
+    if (on) { if (!headings.length) refreshHeadings(); requestAnimationFrame(updateSpy); }
+    else { pinBar.classList.remove('show'); pinIdx = -1; }
+  }
+  btnPin.onclick = () => setPin(!pinOn());
+  pinBar.addEventListener('click', () => { if (pinIdx >= 0) gotoHeading(pinIdx); });
   function setToc(on) {
     document.body.classList.toggle('toc-open', on);
     btnToc.classList.toggle('active', on);
+    updateSideOpen();
     localStorage.setItem('mdlive-toc', on ? '1' : '0');
     if (on) { buildToc(); requestAnimationFrame(updateSpy); }
   }
@@ -474,9 +578,211 @@
     document.addEventListener('mouseup', up);
   });
 
+  // ===== Buscador ===========================================================
+  const btnSearch = document.getElementById('btn-search');
+  const searchInput = document.getElementById('search-input');
+  const searchResults = document.getElementById('search-results');
+  const sideVdivider = document.getElementById('side-vdivider');
+  let searchTimer = null;
+  let searchHits = [];   // [{line, col, row}] en orden de documento (una por línea coincidente)
+  let searchCur = -1;    // resultado activo (para Ctrl+N / Ctrl+P)
+
+  function searchOpen() { return document.body.classList.contains('search-open'); }
+  function updateSideOpen() { document.body.classList.toggle('side-open', tocOpen() || searchOpen()); }
+  function escHtml(s) { return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+
+  // resalta todas las ocurrencias de q (substring, case-insensitive) en root, envolviéndolas
+  // en <mark class="search-hit"> sin romper el HTML (opera sobre nodos de texto; salta SVG)
+  function highlightInElement(root, q) {
+    if (!q) return;
+    const ql = q.toLowerCase();
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(n) {
+        if (!n.nodeValue || n.nodeValue.toLowerCase().indexOf(ql) === -1) return NodeFilter.FILTER_REJECT;
+        const p = n.parentNode; if (!p) return NodeFilter.FILTER_REJECT;
+        if (p.tagName === 'SCRIPT' || p.tagName === 'STYLE' || p.tagName === 'MARK') return NodeFilter.FILTER_REJECT;
+        if (p.closest && p.closest('svg')) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    const nodes = []; let n;
+    while ((n = walker.nextNode())) nodes.push(n);
+    for (const node of nodes) {
+      const text = node.nodeValue, lower = text.toLowerCase();
+      const frag = document.createDocumentFragment();
+      let i = 0, last = 0;
+      while ((i = lower.indexOf(ql, last)) !== -1) {
+        if (i > last) frag.appendChild(document.createTextNode(text.slice(last, i)));
+        const mk = document.createElement('mark'); mk.className = 'search-hit';
+        mk.textContent = text.slice(i, i + ql.length);
+        frag.appendChild(mk); last = i + ql.length;
+      }
+      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      node.parentNode.replaceChild(frag, node);
+    }
+  }
+  function clearHighlights(root) {
+    const marks = root.querySelectorAll('mark.search-hit');
+    marks.forEach((m) => m.replaceWith(document.createTextNode(m.textContent)));
+    if (marks.length) root.normalize();
+  }
+
+  // snippet de una coincidencia (en col): tres partes antes|match|después con todo el
+  // contexto (acotado); el CSS centra el match (bf/af con igual ancho) y recorta con …
+  // a cada lado según el ancho del panel (responsive, sin recalcular en JS).
+  function snippetHtml(line, col, qlen) {
+    const CTX = 220;  // contexto máx. por lado (suficiente para anchos grandes del panel)
+    return '<span class="bf">' + escHtml(line.slice(Math.max(0, col - CTX), col)) + '</span>'
+         + '<mark>' + escHtml(line.slice(col, col + qlen)) + '</mark>'
+         + '<span class="af">' + escHtml(line.slice(col + qlen, col + qlen + CTX)) + '</span>';
+  }
+
+  const MAX_RESULTS = 800;
+  function runSearch(raw) {
+    const q = (raw || '').trim();
+    searchQuery = q;
+    searchHits = []; searchCur = -1;
+    searchResults.innerHTML = '';
+    if (!q) {
+      searchResults.innerHTML = '<div class="search-info">Escribe para buscar…</div>';
+    } else {
+      const ql = q.toLowerCase();
+      const lines = docSource.split('\n');
+      let count = 0, shown = 0, occGlobal = 0, maxLine = 0;
+      const frag = document.createDocumentFragment();
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i], lower = line.toLowerCase();
+        // UNA entrada por cada ocurrencia de la línea (no solo la primera)
+        for (let c = lower.indexOf(ql); c !== -1; c = lower.indexOf(ql, c + ql.length)) {
+          count++;
+          const occ = occGlobal++;  // índice de ocurrencia global -> mapea al <mark> del visor
+          if (shown < MAX_RESULTS) {
+            const row = document.createElement('div');
+            row.className = 'sr';
+            row.innerHTML = '<span class="ln">' + (i + 1) + '</span><span class="tx">' + snippetHtml(line, c, ql.length) + '</span>';
+            const idx = searchHits.length;
+            searchHits.push({ line: i + 1, col: c, occ, row });
+            row.addEventListener('click', () => gotoHit(idx, true));
+            frag.appendChild(row); shown++; maxLine = i + 1;
+          }
+        }
+      }
+      if (!count) { searchResults.innerHTML = '<div class="search-info">Sin coincidencias.</div>'; }
+      else {
+        searchResults.style.setProperty('--ln-w', String(maxLine).length + 'ch');
+        const info = document.createElement('div');
+        info.className = 'search-info';
+        info.textContent = count + (count === 1 ? ' coincidencia' : ' coincidencias') + (shown < count ? ' (mostrando ' + shown + ')' : '');
+        searchResults.appendChild(info); searchResults.appendChild(frag);
+      }
+    }
+    // resaltado in-situ
+    if (editMode && cmView) {
+      if (setSearchEffect) cmView.dispatch({ effects: setSearchEffect.of(q) });
+    } else {
+      clearHighlights(content);
+      if (q) highlightInElement(content, q);
+    }
+  }
+
+  // halo rectangular que decrece ligeramente hasta el recuadro de la coincidencia
+  function showHalo(rect) {
+    if (!rect) return;
+    const el = document.createElement('div');
+    el.className = 'mdlive-halo';
+    el.style.left = rect.left + 'px'; el.style.top = rect.top + 'px';
+    el.style.width = Math.max(2, rect.width) + 'px'; el.style.height = Math.max(2, rect.height) + 'px';
+    document.body.appendChild(el);
+    const done = () => el.remove();
+    el.addEventListener('animationend', done);
+    setTimeout(done, 700);
+  }
+  // en el visor: halo sobre la coincidencia más cercana a targetY (tras el scroll)
+  function haloAtMarkNear(targetY) {
+    let best = null, bestD = Infinity;
+    content.querySelectorAll('mark.search-hit').forEach((m) => {
+      const r = m.getBoundingClientRect();
+      if (!r.height) return;
+      const d = Math.abs((r.top + r.bottom) / 2 - targetY);
+      if (d < bestD) { bestD = d; best = r; }
+    });
+    if (best) showHalo(best);
+  }
+  function gotoHit(idx, fromClick) {
+    if (idx < 0 || idx >= searchHits.length) return;
+    searchCur = idx;
+    const hit = searchHits[idx];
+    searchResults.querySelectorAll('.sr.active').forEach((e) => e.classList.remove('active'));
+    if (hit.row) { hit.row.classList.add('active'); hit.row.scrollIntoView({ block: 'nearest' }); }
+    if (editMode && cmView) {
+      const doc = cmView.state.doc;
+      const lnObj = doc.line(Math.min(doc.lines, Math.max(1, hit.line)));
+      const pos = Math.min(lnObj.to, lnObj.from + (hit.col || 0));
+      const head = Math.min(lnObj.to, pos + searchQuery.length);
+      cmView.dispatch({ selection: { anchor: pos, head }, effects: window.CM.view.EditorView.scrollIntoView(pos, { y: 'center' }) });
+      if (fromClick) cmView.focus();
+      requestAnimationFrame(() => {
+        const c1 = cmView.coordsAtPos(pos), c2 = cmView.coordsAtPos(head);
+        if (c1) showHalo({ left: c1.left, top: c1.top, width: (c2 ? Math.max(2, c2.left - c1.left) : 8), height: c1.bottom - c1.top });
+      });
+    } else {
+      // visor: el resultado N-ésimo corresponde al <mark> N-ésimo (índice de ocurrencia)
+      const m = content.querySelectorAll('mark.search-hit')[hit.occ];
+      if (m) {
+        m.scrollIntoView({ block: 'center' });
+        requestAnimationFrame(() => showHalo(m.getBoundingClientRect()));
+      } else {
+        // respaldo (p.ej. coincidencia en sintaxis no renderizada): scroll aproximado por línea
+        const total = Math.max(1, docSource.split('\n').length);
+        const sc = document.scrollingElement;
+        const targetY = sc.clientHeight * 0.3;
+        sc.scrollTop = Math.max(0, (hit.line - 1) / total * (sc.scrollHeight - sc.clientHeight) - targetY);
+        requestAnimationFrame(() => requestAnimationFrame(() => haloAtMarkNear(targetY)));
+      }
+    }
+  }
+
+  function setSearch(on) {
+    document.body.classList.toggle('search-open', on);
+    btnSearch.classList.toggle('active', on);
+    updateSideOpen();
+    localStorage.setItem('mdlive-search', on ? '1' : '0');
+    if (on) { searchInput.focus(); searchInput.select(); runSearch(searchInput.value); }
+    else { runSearch(''); }
+  }
+  function toggleSearch() { setSearch(!searchOpen()); }
+  btnSearch.onclick = toggleSearch;
+  searchInput.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => runSearch(searchInput.value), 180); });
+  searchInput.addEventListener('keydown', (e) => {
+    e.stopPropagation();  // el input gestiona sus teclas; que NO lleguen también al handler global
+    if (e.key === 'Escape') { e.preventDefault(); setSearch(false); }
+    else if ((e.ctrlKey || e.metaKey) && (e.key === 'n' || e.key === 'N')) { e.preventDefault(); if (searchHits.length) gotoHit((searchCur + 1) % searchHits.length, false); }
+    else if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); if (searchHits.length) gotoHit((searchCur - 1 + searchHits.length) % searchHits.length, false); }
+  });
+
+  // divisor vertical: alto del buscador cuando coexiste con el índice
+  const savedSplit = localStorage.getItem('mdlive-side-split');
+  if (savedSplit) document.documentElement.style.setProperty('--side-split', savedSplit);
+  sideVdivider.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const sec = document.getElementById('search-sec');
+    const startY = e.clientY, startH = sec.getBoundingClientRect().height;
+    const move = (ev) => {
+      const h = Math.max(90, Math.min(window.innerHeight - 160, startH + (ev.clientY - startY)));
+      document.documentElement.style.setProperty('--side-split', h + 'px');
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+      localStorage.setItem('mdlive-side-split', getComputedStyle(document.documentElement).getPropertyValue('--side-split').trim());
+    };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  });
+
   applyZoom();
-  if (localStorage.getItem('mdlive-width') === 'full') document.body.classList.add('full-width');
   if (localStorage.getItem('mdlive-toc') === '1') { document.body.classList.add('toc-open'); btnToc.classList.add('active'); }
+  if (localStorage.getItem('mdlive-pin') === '1') { document.body.classList.add('pin-on'); btnPin.classList.add('active'); }
+  updateSideOpen();
+  searchResults.innerHTML = '<div class="search-info">Escribe para buscar…</div>';
   initMermaid();
 
   window.__mdlive = {
