@@ -10,9 +10,10 @@
   --quote-border: #d0d7de;  --table-head-bg: #f1f3f5;  --table-zebra: #f6f8fa;
   --editing-bg: #fff8c5;  /* sombreado del bloque en edicion */
   --maxw: 860px;
-  /* fuentes: el editor usa la MISMA de lectura (sans); solo el codigo es mono */
-  --font-body: system-ui, "Noto Sans", "Segoe UI", "DejaVu Sans", sans-serif;
-  --font-mono: "DejaVu Sans Mono", "JetBrains Mono", "Liberation Mono", ui-monospace, monospace;
+  /* fuentes: el editor usa la MISMA de lectura (sans); solo el codigo es mono.
+     Familia Ubuntu por su antialiasing/hinting excelente (Dalton Maag). */
+  --font-body: "Ubuntu", "Ubuntu Sans", system-ui, "Noto Sans", sans-serif;
+  --font-mono: "Ubuntu Mono", "DejaVu Sans Mono", ui-monospace, monospace;
 }
 
 /* el tamano base lo controlas tu (17px); Ctrl+rueda ajusta --mdlive-zoom */
