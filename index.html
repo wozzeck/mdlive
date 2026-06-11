@@ -36,6 +36,42 @@
 <article id="content" class="markdown-body"></article>
 <div id="editor" style="display:none"></div>
 
+<div id="help-overlay" aria-hidden="true">
+  <div id="help-modal" role="dialog" aria-modal="true" aria-label="Atajos de teclado">
+    <button id="help-close" title="Cerrar (Esc)" aria-label="Cerrar">&times;</button>
+    <h2>Atajos de teclado</h2>
+    <div class="help-cols">
+      <section>
+        <h3>General</h3>
+        <table>
+          <tr><td><kbd>t</kbd></td><td>Índice del documento</td></tr>
+          <tr><td><kbd>p</kbd></td><td>Fijar títulos (chincheta)</td></tr>
+          <tr><td><kbd>e</kbd></td><td>Modo edición</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Buscar</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd> / <kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Coincidencia siguiente / anterior</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+rueda</td><td>Zoom de solo texto</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>0</kbd></td><td>Restablecer el zoom</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>H</kbd></td><td>Esta ayuda</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Cerrar / salir de edición</td></tr>
+        </table>
+      </section>
+      <section>
+        <h3>Edición — formato</h3>
+        <table>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td>Negrita</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Cursiva</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>U</kbd></td><td>Subrayado</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>E</kbd></td><td>Código en línea</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd></td><td>Tachado</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></td><td>Enlace</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>.</kbd></td><td>Cita</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>6</kbd></td><td>Encabezado nivel 1–6 (alterna)</td></tr>
+        </table>
+      </section>
+    </div>
+  </div>
+</div>
+
 <script src="app://local/vendor/markdown-it.min.js"></script>
 <script src="app://local/vendor/markdown-it-task-lists.min.js"></script>
 <script src="app://local/vendor/highlight.min.js"></script>
@@ -158,11 +194,11 @@
     const { Decoration, WidgetType, EditorView } = CM.view;
     const { RangeSetBuilder, StateField } = CM.state;
     class MdWidget extends WidgetType {
-      constructor(text, from, q) { super(); this.text = text; this.from = from; this.q = q; }
-      eq(o) { return o.text === this.text && o.from === this.from && o.q === this.q; }
+      constructor(text, from, q, first) { super(); this.text = text; this.from = from; this.q = q; this.first = first; }
+      eq(o) { return o.text === this.text && o.from === this.from && o.q === this.q && o.first === this.first; }
       toDOM(view) {
         const div = document.createElement('div');
-        div.className = 'cm-mdblock markdown-body';
+        div.className = 'cm-mdblock markdown-body' + (this.first ? ' cm-first' : '');
         div.innerHTML = md.render(this.text) || '<p class="mdblock-empty">vacío</p>';
         decorateSync(div);
         if (this.q) highlightInElement(div, this.q);  // resalta ocurrencias en el bloque renderizado
@@ -175,14 +211,32 @@
       }
       ignoreEvent() { return false; }
     }
-    const editingLine = Decoration.line({ class: 'cm-editing' });
-    // item de lista que NO es el primero: replica el margin-top .25em de `li + li`
-    // del render, para que el interlineado de la lista en fuente coincida con el visor
-    const editingLineGap = Decoration.line({ class: 'cm-editing cm-li-gap' });
-    // encabezado ATX en edicion: se muestra la fuente (`# Titulo`) con el tamano del nivel
-    const editingHead = [1, 2, 3, 4, 5, 6].map((n) => Decoration.line({ class: 'cm-editing cm-edit-h' + n }));
+    // cache de decoraciones de linea por clase (cm-editing [+ cm-li-gap | cm-edit-hN])
+    const _lineDeco = {};
+    const lineDeco = (cls) => _lineDeco[cls] || (_lineDeco[cls] = Decoration.line({ class: cls }));
     const ITEM_RE = /^\s*([-*+]|\d+[.)])\s/;
     const HEAD_RE = /^(#{1,6})\s/;
+    // multiplicadores de tamano de fuente por nivel de encabezado (= .markdown-body hN)
+    const FONT_MUL = [2, 1.5, 1.25, 1, .9, .85];
+    // margenes verticales (en rem) que .markdown-body daria a este bloque, para reproducir
+    // EXACTAMENTE el espaciado del visor cuando el bloque se edita como fuente
+    function blockMargins(txt) {
+      const h = txt.match(HEAD_RE);
+      if (h) {
+        const L = h[1].length, m = FONT_MUL[L - 1];
+        // h1/h2 ademas tienen padding-bottom .3em + borde 1px (no colapsan): contribuyen al hueco inferior
+        return { top: 1.8 * m, bottom: .7 * m, padB: (L <= 2) ? (.3 * m + 1 / 17) : 0 };
+      }
+      return { top: 0, bottom: 1.05, padB: 0 };  // p / listas / cita / tabla / pre: margin 0 0 1.05em
+    }
+    // hueco invisible que sustituye a las lineas en blanco entre el bloque editado y el
+    // siguiente, con la altura justa para que el espaciado sea identico al del visor
+    class GapWidget extends WidgetType {
+      constructor(rem) { super(); this.rem = rem; }
+      eq(o) { return o.rem === this.rem; }
+      toDOM() { const d = document.createElement('div'); d.className = 'cm-blockgap'; d.style.height = this.rem.toFixed(3) + 'rem'; return d; }
+      ignoreEvent() { return true; }
+    }
     function build(state) {
       const b = new RangeSetBuilder();
       const sel = state.selection.main;
@@ -191,16 +245,37 @@
       for (let i = 0; i < blocks.length; i++) {
         const blk = blocks[i];
         if (sel.from <= blk.to && sel.to >= blk.from) {
-          // bloque del cursor: se muestra como FUENTE y se sombrea linea a linea
-          let ln = doc.lineAt(blk.from), prevItem = false;
+          // bloque del cursor: se muestra como FUENTE y se sombrea linea a linea.
+          // Para que el toggle vista<->edicion NO desplace el texto, reproducimos el
+          // espaciado del visor: margen SUPERIOR extra (si el del bloque supera al del
+          // anterior) e INFERIOR colapsando las lineas en blanco a la altura justa.
+          const nextB = blocks[i + 1];
+          const C = blockMargins(doc.lineAt(blk.from).text);
+          const nTop = nextB ? blockMargins(doc.lineAt(nextB.from).text).top : 0;
+          // margen SUPERIOR: como el margin-top de la linea fuente COLAPSA con el margen
+          // inferior del widget anterior, ponemos el margen completo del bloque -> el
+          // colapso da max(prev.bottom, C.top), justo el hueco del visor (0 en el 1er bloque)
+          const aboveMargin = (i > 0) ? C.top : 0;   // rem
+          // margen INFERIOR: un GapWidget de altura fija (no colapsa) + el margin-top del
+          // widget siguiente => padB + max(C.bottom, N.top), identico al visor
+          const belowGap = nextB ? (C.padB + Math.max(0, C.bottom - nTop)) : 0;  // rem
+          let ln = doc.lineAt(blk.from), prevItem = false, firstLine = true;
           for (;;) {
             const item = ITEM_RE.test(ln.text);
             const hm = ln.text.match(HEAD_RE);
-            const deco = hm ? editingHead[hm[1].length - 1] : ((item && prevItem) ? editingLineGap : editingLine);
+            const cls = hm ? ('cm-editing cm-edit-h' + hm[1].length) : ((item && prevItem) ? 'cm-editing cm-li-gap' : 'cm-editing');
+            const deco = (firstLine && aboveMargin > 0)
+              ? Decoration.line({ class: cls, attributes: { style: 'margin-top:' + aboveMargin.toFixed(3) + 'rem' } })
+              : lineDeco(cls);
             b.add(ln.from, ln.from, deco);
-            prevItem = item;
+            prevItem = item; firstLine = false;
             if (ln.to >= blk.to) break;
             ln = doc.line(ln.number + 1);
+          }
+          if (nextB) {
+            const blankFrom = doc.line(doc.lineAt(blk.to).number + 1).from;
+            const blankTo = doc.lineAt(nextB.from - 1).to;
+            if (blankTo >= blankFrom) b.add(blankFrom, blankTo, Decoration.replace({ block: true, widget: new GapWidget(belowGap) }));
           }
           continue;
         }
@@ -209,7 +284,7 @@
         // El espaciado lo dan los margenes de .markdown-body -> identico al visor.
         const next = blocks[i + 1];
         const to = next ? doc.lineAt(next.from - 1).to : doc.length;
-        b.add(blk.from, to, Decoration.replace({ widget: new MdWidget(blk.text, blk.from, searchQuery), block: true }));
+        b.add(blk.from, to, Decoration.replace({ widget: new MdWidget(blk.text, blk.from, searchQuery, i === 0), block: true }));
       }
       return b.finish();
     }
@@ -223,9 +298,86 @@
     });
   }
 
+  // ---- comandos de formato (solo activos dentro del editor CodeMirror) -----
+  function cmWordAt(state, pos) {
+    const line = state.doc.lineAt(pos), t = line.text, W = /[\p{L}\p{N}_]/u;
+    let s = pos - line.from, e = s;
+    while (s > 0 && W.test(t[s - 1])) s--;
+    while (e < t.length && W.test(t[e])) e++;
+    return { from: line.from + s, to: line.from + e };
+  }
+  // envuelve la seleccion (o la palabra bajo el cursor) con los marcadores; si ya estan, los quita
+  function cmWrap(view, mark, markEnd) {
+    const end = markEnd == null ? mark : markEnd;
+    const st = view.state; let { from, to } = st.selection.main;
+    if (from === to) { const w = cmWordAt(st, from); from = w.from; to = w.to; }
+    const inner = st.sliceDoc(from, to);
+    const out = st.sliceDoc(Math.max(0, from - mark.length), from);
+    const outA = st.sliceDoc(to, Math.min(st.doc.length, to + end.length));
+    if (out === mark && outA === end) {
+      view.dispatch({ changes: [{ from: from - mark.length, to: from }, { from: to, to: to + end.length }], selection: { anchor: from - mark.length, head: to - mark.length } });
+    } else if (inner.length >= mark.length + end.length && inner.startsWith(mark) && inner.endsWith(end)) {
+      view.dispatch({ changes: { from, to, insert: inner.slice(mark.length, inner.length - end.length) }, selection: { anchor: from, head: to - mark.length - end.length } });
+    } else {
+      view.dispatch({ changes: { from, to, insert: mark + inner + end }, selection: { anchor: from + mark.length, head: to + mark.length } });
+    }
+    view.focus(); return true;
+  }
+  // pone/quita N almohadillas al inicio de cada linea de la seleccion (toggle por nivel)
+  function cmHeading(view, level) {
+    const st = view.state, r = st.selection.main;
+    const a = st.doc.lineAt(r.from), z = st.doc.lineAt(r.to), changes = [];
+    for (let n = a.number; n <= z.number; n++) {
+      const ln = st.doc.line(n), m = ln.text.match(/^(#{1,6})\s+/);
+      const cur = m ? m[1].length : 0;
+      const body = m ? ln.text.slice(m[0].length) : ln.text.replace(/^#+\s*/, '');
+      changes.push({ from: ln.from, to: ln.to, insert: (cur === level) ? body : ('#'.repeat(level) + ' ' + body) });
+    }
+    view.dispatch({ changes }); view.focus(); return true;
+  }
+  // antepone/quita un prefijo en cada linea de la seleccion (cita, etc.)
+  function cmPrefixLines(view, prefix) {
+    const st = view.state, r = st.selection.main;
+    const a = st.doc.lineAt(r.from), z = st.doc.lineAt(r.to);
+    let allHave = true;
+    for (let n = a.number; n <= z.number; n++) if (!st.doc.line(n).text.startsWith(prefix)) { allHave = false; break; }
+    const changes = [];
+    for (let n = a.number; n <= z.number; n++) {
+      const ln = st.doc.line(n);
+      if (allHave) changes.push({ from: ln.from, to: ln.from + prefix.length, insert: '' });
+      else changes.push({ from: ln.from, insert: prefix });
+    }
+    view.dispatch({ changes }); view.focus(); return true;
+  }
+  function cmLink(view) {
+    const st = view.state; let { from, to } = st.selection.main;
+    if (from === to) { const w = cmWordAt(st, from); from = w.from; to = w.to; }
+    const text = st.sliceDoc(from, to) || 'texto';
+    const insert = '[' + text + '](url)', urlAt = from + 1 + text.length + 2;
+    view.dispatch({ changes: { from, to, insert }, selection: { anchor: urlAt, head: urlAt + 3 } });
+    view.focus(); return true;
+  }
+  function formatKeymap(CM) {
+    return CM.view.keymap.of([
+      { key: 'Mod-b', run: (v) => cmWrap(v, '**'), preventDefault: true },
+      { key: 'Mod-k', run: (v) => cmWrap(v, '*'), preventDefault: true },
+      { key: 'Mod-u', run: (v) => cmWrap(v, '<u>', '</u>'), preventDefault: true },
+      { key: 'Mod-e', run: (v) => cmWrap(v, '`'), preventDefault: true },
+      { key: 'Mod-Shift-x', run: (v) => cmWrap(v, '~~'), preventDefault: true },
+      { key: 'Mod-Shift-k', run: cmLink, preventDefault: true },
+      { key: 'Mod-Shift-.', run: (v) => cmPrefixLines(v, '> '), preventDefault: true },
+      { key: 'Mod-1', run: (v) => cmHeading(v, 1), preventDefault: true },
+      { key: 'Mod-2', run: (v) => cmHeading(v, 2), preventDefault: true },
+      { key: 'Mod-3', run: (v) => cmHeading(v, 3), preventDefault: true },
+      { key: 'Mod-4', run: (v) => cmHeading(v, 4), preventDefault: true },
+      { key: 'Mod-5', run: (v) => cmHeading(v, 5), preventDefault: true },
+      { key: 'Mod-6', run: (v) => cmHeading(v, 6), preventDefault: true },
+    ]);
+  }
+
   function buildExtensions(CM) {
     const { EditorView, keymap, drawSelection, Decoration } = CM.view;
-    const { StateField, StateEffect, RangeSetBuilder } = CM.state;
+    const { StateField, StateEffect, RangeSetBuilder, Prec } = CM.state;
     const { history, historyKeymap, defaultKeymap, indentWithTab } = CM.commands;
     const { syntaxHighlighting, defaultHighlightStyle } = CM.language;
     if (!setSearchEffect) setSearchEffect = StateEffect.define();
@@ -257,6 +409,7 @@
       history(),
       drawSelection(),
       EditorView.lineWrapping,
+      Prec.highest(formatKeymap(CM)),  // atajos de formato: prioridad sobre el keymap por defecto
       keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
       CM.markdown(),
       syntaxHighlighting(defaultHighlightStyle),
@@ -350,6 +503,8 @@
   addEventListener('wheel', (e) => { if (!e.ctrlKey) return; e.preventDefault(); zPending += (e.deltaY < 0 ? 0.1 : -0.1); if (!zScheduled) { zScheduled = true; requestAnimationFrame(flushZoom); } }, { passive: false });
 
   addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'h' || e.key === 'H')) { e.preventDefault(); toggleHelp(); return; }
+    if (e.key === 'Escape' && helpOpen()) { e.preventDefault(); setHelp(false); return; }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); setSearch(true); return; }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'n' || e.key === 'N')) { e.preventDefault(); if (searchHits.length) gotoHit((searchCur + 1) % searchHits.length, false); return; }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); if (searchHits.length) gotoHit((searchCur - 1 + searchHits.length) % searchHits.length, false); return; }
@@ -755,7 +910,8 @@
   searchInput.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => runSearch(searchInput.value), 180); });
   searchInput.addEventListener('keydown', (e) => {
     e.stopPropagation();  // el input gestiona sus teclas; que NO lleguen también al handler global
-    if (e.key === 'Escape') { e.preventDefault(); setSearch(false); }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'h' || e.key === 'H')) { e.preventDefault(); toggleHelp(); }
+    else if (e.key === 'Escape') { e.preventDefault(); setSearch(false); }
     else if ((e.ctrlKey || e.metaKey) && (e.key === 'n' || e.key === 'N')) { e.preventDefault(); if (searchHits.length) gotoHit((searchCur + 1) % searchHits.length, false); }
     else if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); if (searchHits.length) gotoHit((searchCur - 1 + searchHits.length) % searchHits.length, false); }
   });
@@ -777,6 +933,14 @@
     };
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
   });
+
+  // ===== Modal de ayuda (Ctrl+H) ============================================
+  const helpOverlay = document.getElementById('help-overlay');
+  function helpOpen() { return document.body.classList.contains('help-open'); }
+  function setHelp(on) { document.body.classList.toggle('help-open', on); helpOverlay.setAttribute('aria-hidden', on ? 'false' : 'true'); }
+  function toggleHelp() { setHelp(!helpOpen()); }
+  document.getElementById('help-close').onclick = () => setHelp(false);
+  helpOverlay.addEventListener('mousedown', (e) => { if (e.target === helpOverlay) setHelp(false); });
 
   applyZoom();
   if (localStorage.getItem('mdlive-toc') === '1') { document.body.classList.add('toc-open'); btnToc.classList.add('active'); }

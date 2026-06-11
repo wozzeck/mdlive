@@ -36,6 +36,8 @@ sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1
 
 ### Atajos
 
+#### Generales
+
 | Tecla | Acción |
 |-------|--------|
 | `t` | Mostrar/ocultar el índice del documento |
@@ -45,7 +47,23 @@ sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1
 | `e` | Entrar/salir del modo edición |
 | `Ctrl`+rueda | Zoom de solo texto |
 | `Ctrl`+`0` | Restablecer el zoom |
-| `Esc` | Salir del modo edición |
+| `Ctrl`+`H` | Ayuda con todos los atajos |
+| `Esc` | Cerrar la ayuda / salir del modo edición |
+
+#### Formato (solo en modo edición)
+
+| Tecla | Acción |
+|-------|--------|
+| `Ctrl`+`B` | Negrita |
+| `Ctrl`+`K` | Cursiva |
+| `Ctrl`+`U` | Subrayado |
+| `Ctrl`+`E` | Código en línea |
+| `Ctrl`+`Shift`+`X` | Tachado |
+| `Ctrl`+`Shift`+`K` | Enlace |
+| `Ctrl`+`Shift`+`.` | Cita |
+| `Ctrl`+`1`…`6` | Encabezado de nivel 1–6 (alterna) |
+
+Cada atajo de formato actúa sobre la selección o, si no hay nada seleccionado, sobre la palabra bajo el cursor.
 
 ## Instalación como aplicación
 

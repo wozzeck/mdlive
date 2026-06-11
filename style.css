@@ -53,7 +53,10 @@ body {
 .markdown-body h4 { font-size: 1em; }
 .markdown-body h5 { font-size: .9em; }
 .markdown-body h6 { font-size: .85em; color: var(--muted); }
-.markdown-body > :first-child { margin-top: 0; }
+/* solo el PRIMER elemento del documento (visor) o del PRIMER bloque del editor pierde
+   el margen superior; cada widget de bloque conserva su margen natural para que el
+   espaciado entre bloques (sobre todo encima de los títulos) sea idéntico al visor */
+#content > :first-child, .cm-mdblock.cm-first > :first-child { margin-top: 0; }
 
 /* ---- texto ---- */
 .markdown-body p, .markdown-body ul, .markdown-body ol,
@@ -108,12 +111,17 @@ body {
 .markdown-body .mermaid svg { max-width: 100%; height: auto; }
 
 /* === Modo edición (CodeMirror 6 live-preview) ============================ */
-#editor { max-width: none; margin: 0 auto; padding: 2rem 2.4rem 6rem; }
+/* mismo padding-top que .markdown-body y sin padding propio de .cm-content:
+   asi el toggle vista<->edicion NO desplaza el texto verticalmente */
+#editor { max-width: none; margin: 0 auto; padding: 3.2rem 2.4rem 6rem; }
 .cm-editor { font-size: 1rem; background: transparent; }
 /* el editor usa la fuente de LECTURA (sans), igual que el visor; el codigo
    dentro de los bloques renderizados sigue saliendo mono por .markdown-body */
 .cm-editor .cm-scroller { line-height: 1.65; font-family: var(--font-body); }
+.cm-editor .cm-content { padding: 0; }
 .cm-editor .cm-line { padding: 0; }
+/* hueco invisible que iguala el espaciado del visor entre bloques al editar */
+.cm-blockgap { user-select: none; }
 /* El bloque renderizado reutiliza .markdown-body SIN caja propia (sin margin,
    padding ni border) para que los margenes de su contenido colapsen igual que
    en el visor: el espaciado entre bloques es identico, no se suma altura. */
@@ -136,6 +144,9 @@ body {
 .cm-editor .cm-edit-h4 { font-size: 1em; }
 .cm-editor .cm-edit-h5 { font-size: .9em; }
 .cm-editor .cm-edit-h6 { font-size: .85em; color: var(--muted); }
+/* sin subrayado en los titulos en edicion (defaultHighlightStyle de CM lo añade) */
+.cm-editor .cm-line[class*="cm-edit-h"],
+.cm-editor .cm-line[class*="cm-edit-h"] * { text-decoration: none; }
 #btn-edit.active { background: var(--link); color: #fff; border-color: var(--link); }
 
 /* === Título de sección fijado (chincheta) ================================ */
@@ -262,3 +273,29 @@ body.search-open.toc-open #side-vdivider {
   cursor: col-resize; z-index: 46;
 }
 #toc-resizer:hover { background: linear-gradient(to right, transparent, rgba(9,105,218,.25)); }
+
+/* === Modal de ayuda (Ctrl+H) ============================================= */
+#help-overlay { display: none; position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.4); }
+body.help-open #help-overlay { display: flex; align-items: center; justify-content: center; }
+#help-modal {
+  position: relative; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 44px rgba(0,0,0,.32);
+  padding: 1.4rem 1.7rem 1.6rem; max-width: 780px; width: calc(100% - 4rem);
+  max-height: calc(100% - 4rem); overflow: auto;
+}
+#help-modal h2 { margin: 0 0 1.1rem; font-size: 1.35em; font-weight: 700; }
+#help-modal h3 { margin: 0 0 .5rem; font-size: .8em; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+#help-close {
+  position: absolute; top: .55rem; right: .75rem; border: 0; background: transparent;
+  color: var(--muted); font-size: 1.7em; line-height: 1; cursor: pointer; padding: 0 .2em;
+}
+#help-close:hover { color: var(--fg); }
+.help-cols { display: flex; gap: 2.2rem; flex-wrap: wrap; }
+.help-cols section { flex: 1 1 320px; }
+#help-modal table { border-collapse: collapse; width: 100%; }
+#help-modal td { padding: .26em .4em; vertical-align: top; font-size: 14px; }
+#help-modal td:first-child { white-space: nowrap; width: 1%; }
+#help-modal kbd {
+  font-family: var(--font-mono); font-size: .82em; background: var(--alt-bg);
+  border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; padding: .08em .42em;
+}
