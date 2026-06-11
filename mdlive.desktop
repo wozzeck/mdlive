@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=mdlive
+GenericName=Visor de Markdown
+Comment=Visor de Markdown con recarga en vivo
+Exec=/home/wzk/.local/bin/mdlive %f
+Icon=/home/wzk/ws/md-live/icon.svg
+Terminal=false
+Categories=Utility;Viewer;TextTools;
+MimeType=text/markdown;text/x-markdown;
+StartupNotify=true
+StartupWMClass=mdlive

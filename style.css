@@ -1,0 +1,177 @@
+/* ===========================================================================
+   md-live - estilo del contenido. EDITABLE: guarda y el visor recarga en vivo.
+   Cambia variables, fuentes, anchos... y lo ves al instante.
+   =========================================================================== */
+
+:root {
+  --bg: #ffffff;  --fg: #1f2328;  --muted: #656d76;
+  --link: #0969da;  --border: #d0d7de;  --alt-bg: #f6f8fa;
+  --code-bg: #f6f8fa;  --code-fg: #1f2328;
+  --quote-border: #d0d7de;  --table-head-bg: #f1f3f5;  --table-zebra: #f6f8fa;
+  --editing-bg: #fff8c5;  /* sombreado del bloque en edicion */
+  --maxw: 860px;
+  /* fuentes: el editor usa la MISMA de lectura (sans); solo el codigo es mono */
+  --font-body: system-ui, "Noto Sans", "Segoe UI", "DejaVu Sans", sans-serif;
+  --font-mono: "DejaVu Sans Mono", "JetBrains Mono", "Liberation Mono", ui-monospace, monospace;
+}
+
+/* el tamano base lo controlas tu (17px); Ctrl+rueda ajusta --mdlive-zoom */
+html { font-size: calc(17px * var(--mdlive-zoom, 1)); }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.markdown-body {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 3.2rem 2.4rem 6rem;
+}
+body.full-width .markdown-body { max-width: none; }
+
+/* RENDIMIENTO: el resaltado de codigo va en una cola que no bloquea (ver
+   index.html), asi que el codigo NO necesita content-visibility -- en WebKitGTK
+   "revelarlo" al hacer scroll provocaba el parpadeo en blanco. Solo se difiere
+   el pintado de los diagramas, que si son caros. */
+.markdown-body .mermaid {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}
+
+/* ---- titulares ---- */
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  font-weight: 700; line-height: 1.25; margin: 1.8em 0 .7em;
+}
+.markdown-body h1 { font-size: 2em;    padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+.markdown-body h2 { font-size: 1.5em;  padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+.markdown-body h3 { font-size: 1.25em; }
+.markdown-body h4 { font-size: 1em; }
+.markdown-body h5 { font-size: .9em; }
+.markdown-body h6 { font-size: .85em; color: var(--muted); }
+.markdown-body > :first-child { margin-top: 0; }
+
+/* ---- texto ---- */
+.markdown-body p, .markdown-body ul, .markdown-body ol,
+.markdown-body blockquote, .markdown-body table, .markdown-body pre { margin: 0 0 1.05em; }
+.markdown-body strong, .markdown-body b { font-weight: 700; }
+.markdown-body a { color: var(--link); text-decoration: none; }
+.markdown-body a:hover { text-decoration: underline; }
+.markdown-body hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
+.markdown-body img { max-width: 100%; }
+
+/* ---- listas ---- */
+.markdown-body ul, .markdown-body ol { padding-left: 1.6em; }
+.markdown-body li + li { margin-top: .25em; }
+.markdown-body li > ul, .markdown-body li > ol { margin: .25em 0 0; }
+.markdown-body input[type=checkbox] { margin-right: .5em; }
+
+/* ---- citas ---- */
+.markdown-body blockquote {
+  margin-left: 0; padding: .2em 1em; color: var(--muted);
+  border-left: .25em solid var(--quote-border);
+}
+
+/* ---- codigo ---- */
+.markdown-body code, .markdown-body kbd, .markdown-body pre, .markdown-body tt {
+  font-family: var(--font-mono);
+}
+.markdown-body :not(pre) > code {
+  background: var(--code-bg); color: var(--code-fg);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: .12em .38em; font-size: .88em;
+}
+.markdown-body pre {
+  background: var(--code-bg); color: var(--code-fg);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 1em 1.1em; overflow: auto; font-size: .86em; line-height: 1.55;
+}
+.markdown-body pre code, .markdown-body pre code.hljs {
+  background: transparent !important; border: 0; padding: 0; font-size: inherit;
+}
+
+/* ---- tablas: rejilla limpia y uniforme ---- */
+.markdown-body table {
+  border-collapse: collapse; width: auto; max-width: 100%;
+  display: block; overflow: auto;
+}
+.markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: .5em .85em; }
+.markdown-body th { background: var(--table-head-bg); font-weight: 700; text-align: left; }
+.markdown-body tbody tr:nth-child(2n) { background: var(--table-zebra); }
+
+/* ---- mermaid ---- */
+.markdown-body .mermaid { text-align: center; margin: 1.3em 0; }
+.markdown-body .mermaid svg { max-width: 100%; height: auto; }
+
+/* === Modo edición (CodeMirror 6 live-preview) ============================ */
+#editor { max-width: var(--maxw); margin: 0 auto; padding: 2rem 2.4rem 6rem; }
+body.full-width #editor { max-width: none; }
+.cm-editor { font-size: 1rem; background: transparent; }
+/* el editor usa la fuente de LECTURA (sans), igual que el visor; el codigo
+   dentro de los bloques renderizados sigue saliendo mono por .markdown-body */
+.cm-editor .cm-scroller { line-height: 1.65; font-family: var(--font-body); }
+.cm-editor .cm-line { padding: 0; }
+/* El bloque renderizado reutiliza .markdown-body SIN caja propia (sin margin,
+   padding ni border) para que los margenes de su contenido colapsen igual que
+   en el visor: el espaciado entre bloques es identico, no se suma altura. */
+/* white-space:normal es CLAVE: CM pone pre-wrap en .cm-content y se hereda al
+   widget -> los \n que md.render deja entre <li>/<tr> y dentro de <p> multilinea
+   se renderizarian como saltos literales, inflando el espaciado. */
+.cm-mdblock.markdown-body { max-width: none; margin: 0; padding: 0; cursor: text; white-space: normal; }
+.mdblock-empty { color: var(--muted); font-style: italic; }
+/* bloque en edicion: se ve como fuente y se sombrea para distinguirlo */
+.cm-editor .cm-editing { background: var(--editing-bg); }
+/* item de lista (no el primero) en fuente: replica el margin .25em de `li + li`
+   del visor para que el interlineado de la lista coincida con el modo lectura */
+.cm-editor .cm-li-gap { padding-top: .25em; }
+#btn-edit.active { background: var(--link); color: #fff; border-color: var(--link); }
+
+/* === Índice / árbol del documento (panel izquierdo) ====================== */
+:root { --toc-w: 270px; }
+/* cuando el panel está abierto, el contenido se desplaza (no se tapa) */
+body.toc-open { padding-left: var(--toc-w); }
+#toc-panel { display: none; }
+body.toc-open #toc-panel {
+  display: flex; flex-direction: column;
+  position: fixed; left: 0; top: 0; bottom: 0; width: var(--toc-w);
+  background: var(--alt-bg); border-right: 1px solid var(--border);
+  z-index: 45; box-shadow: 0 0 12px rgba(0,0,0,.06);
+}
+#toc-head {
+  display: flex; align-items: center; gap: .4rem;
+  font-weight: 700; font-size: 12px; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); padding: .65rem .85rem; border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+#toc-list { flex: 1 1 auto; overflow: auto; padding: .35rem 0 1rem; }
+#toc-list .toc-row { display: flex; align-items: flex-start; line-height: 1.35; }
+#toc-list .toc-tw {
+  flex: 0 0 1.1em; width: 1.1em; text-align: center; cursor: default;
+  color: var(--muted); font-size: 10px; padding-top: .42em; user-select: none;
+}
+#toc-list .toc-tw.has { cursor: pointer; }
+#toc-list .toc-tw.has:hover { color: var(--fg); }
+#toc-list a {
+  flex: 1 1 auto; display: block; min-width: 0;
+  padding: .2em .85rem .2em calc(var(--lvl, 0) * .8rem);
+  color: var(--fg); text-decoration: none; font-size: 13px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border-left: 2px solid transparent;
+}
+#toc-list a:hover { background: rgba(127,127,127,.12); }
+#toc-list a.active {
+  color: var(--link); font-weight: 600;
+  border-left-color: var(--link); background: rgba(9,105,218,.09);
+}
+#toc-list .toc-empty { color: var(--muted); font-style: italic; padding: .6rem .85rem; font-size: 13px; }
+/* tirador de redimensionado en el borde derecho del panel */
+#toc-resizer {
+  position: absolute; top: 0; right: -3px; width: 7px; height: 100%;
+  cursor: col-resize; z-index: 46;
+}
+#toc-resizer:hover { background: linear-gradient(to right, transparent, rgba(9,105,218,.25)); }

@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mdlive</title>
+<link rel="stylesheet" href="app://local/vendor/github.min.css">
+<link id="usercss" rel="stylesheet" href="app://local/style.css">
+<style>
+  #toolbar { position: fixed; top: .6rem; right: .9rem; display: flex; flex-direction: column; gap: .3rem; z-index: 50; opacity: .3; transition: opacity .15s; }
+  #toolbar:hover { opacity: 1; }
+  #toolbar button { cursor: pointer; border: 1px solid var(--border, #ccc); background: var(--alt-bg, #f3f3f3); color: inherit; border-radius: 6px; font-size: 13px; line-height: 1; width: 30px; height: 27px; padding: 0; display: flex; align-items: center; justify-content: center; }
+  #toolbar button.active { background: var(--link, #0969da); color: #fff; border-color: var(--link, #0969da); }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <button id="btn-toc" title="Índice del documento (tecla t)">&#9776;</button>
+  <button id="btn-edit" title="Modo edición (tecla e)">&#9999;&#65039;</button>
+  <button id="btn-width" title="Ancho lectura / completo (tecla w)">&#8596;</button>
+</div>
+<aside id="toc-panel" aria-hidden="true">
+  <div id="toc-head"><span>Índice</span></div>
+  <nav id="toc-list"></nav>
+  <div id="toc-resizer" title="Arrastrar para redimensionar"></div>
+</aside>
+<article id="content" class="markdown-body"></article>
+<div id="editor" style="display:none"></div>
+
+<script src="app://local/vendor/markdown-it.min.js"></script>
+<script src="app://local/vendor/markdown-it-task-lists.min.js"></script>
+<script src="app://local/vendor/highlight.min.js"></script>
+<script src="app://local/vendor/mermaid.min.js"></script>
+<script src="app://local/vendor/codemirror.js"></script>
+<script>
+(function () {
+  const md = window.markdownit({ html: true, linkify: true, typographer: true });
+  if (window.markdownitTaskLists) md.use(window.markdownitTaskLists, { enabled: true, label: true });
+
+  const content = document.getElementById('content');
+  const editorHost = document.getElementById('editor');
+  const btnEdit = document.getElementById('btn-edit');
+  let mermaidReady = false;
+  let editMode = false;
+  let docSource = '';
+  let cmView = null;
+
+  function initMermaid() {
+    if (!window.mermaid) return;
+    window.mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'default' });
+    mermaidReady = true;
+  }
+  function extractMermaid(root) {
+    root.querySelectorAll('code.language-mermaid').forEach((c) => {
+      const host = c.closest('pre') || c;
+      const div = document.createElement('div');
+      div.className = 'mermaid';
+      div.textContent = c.textContent;
+      host.replaceWith(div);
+    });
+  }
+  function decorateSync(root) {
+    if (!mermaidReady) initMermaid();
+    extractMermaid(root);
+    root.querySelectorAll('.mermaid:not([data-processed])').forEach((el) => { try { window.mermaid.run({ nodes: [el] }); } catch (_) {} });
+    root.querySelectorAll('pre code').forEach((b) => {
+      if (!b.classList.contains('language-mermaid') && !b.classList.contains('hljs')) { try { window.hljs.highlightElement(b); } catch (_) {} }
+    });
+  }
+
+  // ===== MODO VISOR (lazy) ==================================================
+  const queue = [];
+  let pumping = false;
+  function pump() {
+    if (pumping) return;
+    pumping = true;
+    const ric = window.requestIdleCallback;
+    const run = (deadline) => {
+      const hasIdle = deadline && typeof deadline.timeRemaining === 'function';
+      let budget = ric ? 99 : 3;
+      while (queue.length && budget > 0 && (!hasIdle || deadline.timeRemaining() > 3)) { try { (queue.shift())(); } catch (_) {} budget--; }
+      if (queue.length) (ric || requestAnimationFrame)(run); else pumping = false;
+    };
+    (ric || requestAnimationFrame)(run);
+  }
+  const enqueue = (job) => { queue.push(job); pump(); };
+  let io = null;
+  function ensureObserver() {
+    if (io) return;
+    io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        const el = e.target; io.unobserve(el);
+        if (el.tagName === 'PRE') { const code = el.querySelector(':scope > code'); if (code) enqueue(() => window.hljs.highlightElement(code)); }
+        else if (el.classList.contains('mermaid')) enqueue(() => { if (!mermaidReady) initMermaid(); window.mermaid.run({ nodes: [el] }); });
+      }
+    }, { rootMargin: '800px 0px' });
+  }
+  function observeLazy(root) {
+    ensureObserver();
+    root.querySelectorAll('pre').forEach((pre) => { const code = pre.querySelector(':scope > code'); if (code && !code.classList.contains('hljs') && !code.classList.contains('language-mermaid')) io.observe(pre); });
+    root.querySelectorAll('.mermaid:not([data-processed])').forEach((el) => io.observe(el));
+  }
+  function renderView() {
+    const sc = document.scrollingElement;
+    const ratio = sc.scrollTop / Math.max(1, sc.scrollHeight - sc.clientHeight);
+    queue.length = 0;
+    content.innerHTML = md.render(docSource);
+    extractMermaid(content);
+    observeLazy(content);
+    sc.scrollTop = ratio * Math.max(1, sc.scrollHeight - sc.clientHeight);
+    if (tocOpen()) { buildToc(); requestAnimationFrame(updateSpy); }
+  }
+  let lastFetched = null;
+  async function refreshFromDisk(force) {
+    let txt;
+    try { txt = await (await fetch('app://local/raw', { cache: 'no-store' })).text(); } catch (_) { return; }
+    if (!force && txt === lastFetched) return;
+    lastFetched = txt; docSource = txt;
+    if (!editMode) renderView();
+  }
+
+  // ===== MODO EDICION: CodeMirror 6 + live-preview por bloques ==============
+  // Agrupa lineas en bloques (respeta fences). Cada bloque que NO toca el
+  // cursor se reemplaza por un widget renderizado; el del cursor queda en fuente.
+  function blocksOf(state) {
+    const doc = state.doc, res = [];
+    let from = null, lines = [], inFence = false, ch = '';
+    for (let i = 1; i <= doc.lines; i++) {
+      const line = doc.line(i), t = line.text, m = t.match(/^\s*(```+|~~~+)/);
+      if (!inFence && m) { if (from === null) from = line.from; lines.push(t); inFence = true; ch = m[1][0]; continue; }
+      if (inFence) {
+        lines.push(t);
+        if (new RegExp('^\\s*' + (ch === '`' ? '`{3,}' : '~{3,}') + '\\s*$').test(t)) inFence = false;
+        continue;
+      }
+      if (t.trim() === '') { if (from !== null) { res.push({ from, to: doc.line(i - 1).to, text: lines.join('\n') }); from = null; lines = []; } }
+      else { if (from === null) from = line.from; lines.push(t); }
+    }
+    if (from !== null) res.push({ from, to: doc.line(doc.lines).to, text: lines.join('\n') });
+    return res;
+  }
+
+  function makeLivePreview(CM) {
+    const { Decoration, WidgetType, EditorView } = CM.view;
+    const { RangeSetBuilder, StateField } = CM.state;
+    class MdWidget extends WidgetType {
+      constructor(text, from) { super(); this.text = text; this.from = from; }
+      eq(o) { return o.text === this.text && o.from === this.from; }
+      toDOM(view) {
+        const div = document.createElement('div');
+        div.className = 'cm-mdblock markdown-body';
+        div.innerHTML = md.render(this.text) || '<p class="mdblock-empty">vacío</p>';
+        decorateSync(div);
+        div.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          view.dispatch({ selection: { anchor: this.from } });
+          view.focus();
+        });
+        return div;
+      }
+      ignoreEvent() { return false; }
+    }
+    const editingLine = Decoration.line({ class: 'cm-editing' });
+    // item de lista que NO es el primero: replica el margin-top .25em de `li + li`
+    // del render, para que el interlineado de la lista en fuente coincida con el visor
+    const editingLineGap = Decoration.line({ class: 'cm-editing cm-li-gap' });
+    const ITEM_RE = /^\s*([-*+]|\d+[.)])\s/;
+    function build(state) {
+      const b = new RangeSetBuilder();
+      const sel = state.selection.main;
+      const doc = state.doc;
+      const blocks = blocksOf(state);
+      for (let i = 0; i < blocks.length; i++) {
+        const blk = blocks[i];
+        if (sel.from <= blk.to && sel.to >= blk.from) {
+          // bloque del cursor: se muestra como FUENTE y se sombrea linea a linea
+          let ln = doc.lineAt(blk.from), prevItem = false;
+          for (;;) {
+            const item = ITEM_RE.test(ln.text);
+            b.add(ln.from, ln.from, (item && prevItem) ? editingLineGap : editingLine);
+            prevItem = item;
+            if (ln.to >= blk.to) break;
+            ln = doc.line(ln.number + 1);
+          }
+          continue;
+        }
+        // El widget ABSORBE las lineas en blanco que siguen, hasta el inicio del
+        // bloque siguiente: asi NO quedan .cm-line vacias visibles entre bloques.
+        // El espaciado lo dan los margenes de .markdown-body -> identico al visor.
+        const next = blocks[i + 1];
+        const to = next ? doc.lineAt(next.from - 1).to : doc.length;
+        b.add(blk.from, to, Decoration.replace({ widget: new MdWidget(blk.text, blk.from), block: true }));
+      }
+      return b.finish();
+    }
+    // Las decoraciones de BLOQUE deben venir de un StateField (no de un ViewPlugin).
+    return StateField.define({
+      create: (state) => build(state),
+      update: (value, tr) => (tr.docChanged || tr.selection) ? build(tr.state) : value,
+      provide: (f) => EditorView.decorations.from(f),
+    });
+  }
+
+  function buildExtensions(CM) {
+    const { EditorView, keymap, drawSelection, highlightActiveLine } = CM.view;
+    const { history, historyKeymap, defaultKeymap, indentWithTab } = CM.commands;
+    const { syntaxHighlighting, defaultHighlightStyle } = CM.language;
+    const saveOnChange = EditorView.updateListener.of((u) => {
+      if (u.docChanged) { docSource = u.state.doc.toString(); lastFetched = docSource; scheduleSave(); }
+    });
+    return [
+      history(),
+      drawSelection(),
+      EditorView.lineWrapping,
+      keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+      CM.markdown(),
+      syntaxHighlighting(defaultHighlightStyle),
+      makeLivePreview(CM),
+      saveOnChange,
+      EditorView.theme({
+        '&': { color: 'var(--fg)', backgroundColor: 'transparent' },
+        '.cm-content': { fontFamily: 'var(--font-body)', caretColor: 'var(--fg)' },
+        '.cm-cursor': { borderLeftColor: 'var(--fg)' },
+        '&.cm-focused': { outline: 'none' },
+        '.cm-activeLine': { backgroundColor: 'transparent' },
+      }),
+    ];
+  }
+
+  function enterEdit() {
+    content.style.display = 'none';
+    editorHost.style.display = '';
+    editorHost.innerHTML = '';
+    cmView = new window.CM.view.EditorView({ doc: docSource, parent: editorHost, extensions: buildExtensions(window.CM) });
+    cmView.scrollDOM.addEventListener('scroll', onAnyScroll, { passive: true });
+    cmView.focus();
+    if (tocOpen()) { buildToc(); requestAnimationFrame(updateSpy); }
+  }
+  function exitEdit() {
+    if (cmView) { docSource = cmView.state.doc.toString(); lastFetched = docSource; saveNow(); cmView.destroy(); cmView = null; }
+    editorHost.style.display = 'none';
+    content.style.display = '';
+    renderView();
+  }
+
+  // ---- guardado ----
+  let saveTimer = null, pendingSave = false;
+  function scheduleSave() { pendingSave = true; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 500); }
+  function saveNow() {
+    if (!pendingSave) return; pendingSave = false;
+    try { window.webkit.messageHandlers.mdliveSave.postMessage(docSource); } catch (_) {}
+  }
+
+  // ---- toggle ----
+  function setEditMode(on) {
+    if (on === editMode || !window.CM) return;
+    editMode = on;
+    document.body.classList.toggle('edit-mode', on);
+    btnEdit.classList.toggle('active', on);
+    if (on) enterEdit(); else exitEdit();
+  }
+  btnEdit.onclick = () => setEditMode(!editMode);
+
+  // ===== comunes ============================================================
+  function reloadCss() {
+    const l = document.getElementById('usercss');
+    const u = new URL(l.getAttribute('href'), location.href);
+    u.searchParams.set('t', Date.now());
+    l.setAttribute('href', u.toString());
+  }
+  async function refreshTitle() { try { document.title = (await (await fetch('app://local/title')).text()) + ' — mdlive'; } catch (_) {} }
+
+  function findAnchor() {
+    const centerY = window.innerHeight / 2, kids = content.children;
+    for (let i = 0; i < kids.length; i++) {
+      const r = kids[i].getBoundingClientRect();
+      if (r.bottom >= centerY) return { el: kids[i], frac: r.height ? Math.max(0, Math.min(1, (centerY - r.top) / r.height)) : 0 };
+    }
+    return null;
+  }
+  function restoreAnchor(a) {
+    if (!a || !a.el || !a.el.isConnected) return;
+    const sc = document.scrollingElement, r = a.el.getBoundingClientRect();
+    sc.scrollTop = (sc.scrollTop + r.top + a.frac * r.height) - window.innerHeight / 2;
+  }
+  function toggleWidth() {
+    const a = findAnchor();
+    document.body.classList.toggle('full-width');
+    localStorage.setItem('mdlive-width', document.body.classList.contains('full-width') ? 'full' : 'reading');
+    restoreAnchor(a);
+  }
+  document.getElementById('btn-width').onclick = toggleWidth;
+  let lastAnchor = null, scrollTick = false, resizeTick = false, spyTick = false;
+  addEventListener('scroll', () => { if (scrollTick) return; scrollTick = true; requestAnimationFrame(() => { if (!editMode) lastAnchor = findAnchor(); updateSpy(); scrollTick = false; }); }, { passive: true });
+  addEventListener('resize', () => { if (resizeTick) return; resizeTick = true; requestAnimationFrame(() => { if (!editMode) restoreAnchor(lastAnchor); resizeTick = false; }); });
+  // el editor CM puede tener su propio scroller -> mismo spy, con su throttle
+  function onAnyScroll() { if (spyTick) return; spyTick = true; requestAnimationFrame(() => { updateSpy(); spyTick = false; }); }
+
+  // zoom de solo texto (Ctrl+rueda, Ctrl+0)
+  let zoom = parseFloat(localStorage.getItem('mdlive-zoom')) || 1;
+  let zPending = 0, zScheduled = false;
+  function applyZoom() { document.documentElement.style.setProperty('--mdlive-zoom', String(zoom)); localStorage.setItem('mdlive-zoom', String(zoom)); }
+  function flushZoom() {
+    zScheduled = false; if (!zPending) return;
+    const a = editMode ? null : findAnchor();
+    const d = Math.max(-0.2, Math.min(0.2, zPending)); zPending = 0;
+    zoom = Math.max(0.5, Math.min(4, +(zoom + d).toFixed(3)));
+    applyZoom(); restoreAnchor(a);
+  }
+  addEventListener('wheel', (e) => { if (!e.ctrlKey) return; e.preventDefault(); zPending += (e.deltaY < 0 ? 0.1 : -0.1); if (!zScheduled) { zScheduled = true; requestAnimationFrame(flushZoom); } }, { passive: false });
+
+  addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === '0') { e.preventDefault(); zoom = 1; applyZoom(); return; }
+    // dentro del editor CM, no robar teclas (salvo Escape para salir de edicion)
+    if (editMode) { if (e.key === 'Escape') { e.preventDefault(); setEditMode(false); } return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName || '')) return;
+    // preventDefault: si no, al entrar en edicion con 'e' la tecla se cuela en el editor
+    if (e.key === 'w') { e.preventDefault(); toggleWidth(); }
+    else if (e.key === 'e') { e.preventDefault(); setEditMode(true); }
+    else if (e.key === 't') { e.preventDefault(); toggleToc(); }
+  });
+
+  // ===== Índice / árbol del documento =======================================
+  const tocList = document.getElementById('toc-list');
+  const btnToc = document.getElementById('btn-toc');
+  const tocResizer = document.getElementById('toc-resizer');
+  let headings = [];   // [{level, text, line}]
+  let tocLinks = [];   // [{row, a}]
+  const collapsed = new Set();
+  let activeIdx = -1;
+
+  function tocOpen() { return document.body.classList.contains('toc-open'); }
+  function plainText(s) {
+    return s.replace(/`([^`]+)`/g, '$1')
+            .replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1')
+            .replace(/__([^_]+)__/g, '$1').replace(/(^|[^_])_([^_]+)_/g, '$1$2')
+            .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+            .replace(/<[^>]+>/g, '').trim();
+  }
+  function parseHeadings(src) {
+    const lines = src.split('\n');
+    const res = [];
+    let inFence = false, ch = '';
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i];
+      const mf = t.match(/^\s*(```+|~~~+)/);
+      if (!inFence && mf) { inFence = true; ch = mf[1][0]; continue; }
+      if (inFence) { if (new RegExp('^\\s*' + (ch === '`' ? '`{3,}' : '~{3,}') + '\\s*$').test(t)) inFence = false; continue; }
+      const m = t.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+      if (m) res.push({ level: m[1].length, text: plainText(m[2]), line: i });
+    }
+    return res;
+  }
+  // fin (exclusivo) del subarbol de i: primer heading posterior con nivel <= el suyo
+  function endOf(i) {
+    const lvl = headings[i].level; let k = i + 1;
+    while (k < headings.length && headings[k].level > lvl) k++;
+    return k;
+  }
+  function isHidden(i) {
+    for (const c of collapsed) if (c < i && i < endOf(c)) return true;
+    return false;
+  }
+  function buildToc() {
+    headings = parseHeadings(docSource);
+    tocList.innerHTML = ''; tocLinks = []; activeIdx = -1;
+    if (!headings.length) { tocList.innerHTML = '<div class="toc-empty">Sin encabezados</div>'; return; }
+    const minLvl = Math.min.apply(null, headings.map((h) => h.level));
+    headings.forEach((h, i) => {
+      const row = document.createElement('div');
+      row.className = 'toc-row';
+      row.style.setProperty('--lvl', h.level - minLvl);
+      const tw = document.createElement('span');
+      tw.className = 'toc-tw';
+      if (endOf(i) > i + 1) {
+        tw.classList.add('has');
+        tw.textContent = collapsed.has(i) ? '▸' : '▾';
+        tw.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); toggleCollapse(i); });
+      }
+      const a = document.createElement('a');
+      a.href = '#'; a.textContent = h.text; a.title = h.text;
+      a.addEventListener('click', (e) => { e.preventDefault(); gotoHeading(i); });
+      row.appendChild(tw); row.appendChild(a);
+      tocList.appendChild(row);
+      tocLinks[i] = { row, a };
+    });
+    applyCollapsed();
+  }
+  function applyCollapsed() {
+    headings.forEach((h, i) => { if (tocLinks[i]) tocLinks[i].row.style.display = isHidden(i) ? 'none' : ''; });
+  }
+  function toggleCollapse(i) {
+    if (collapsed.has(i)) collapsed.delete(i); else collapsed.add(i);
+    const tw = tocLinks[i] && tocLinks[i].row.querySelector('.toc-tw');
+    if (tw) tw.textContent = collapsed.has(i) ? '▸' : '▾';
+    applyCollapsed();
+  }
+  function gotoHeading(i) {
+    const h = headings[i]; if (!h) return;
+    if (editMode && cmView) {
+      const doc = cmView.state.doc;
+      const pos = doc.line(Math.min(doc.lines, h.line + 1)).from;
+      cmView.dispatch({ selection: { anchor: pos }, effects: window.CM.view.EditorView.scrollIntoView(pos, { y: 'start', yMargin: 14 }) });
+      cmView.focus();
+    } else {
+      const els = content.querySelectorAll('h1,h2,h3,h4,h5,h6');
+      const el = els[i];
+      if (el) { const sc = document.scrollingElement; sc.scrollTop = sc.scrollTop + el.getBoundingClientRect().top - 10; }
+    }
+    setActive(i);
+  }
+  function setActive(i) {
+    if (i === activeIdx) return;
+    if (activeIdx >= 0 && tocLinks[activeIdx]) tocLinks[activeIdx].a.classList.remove('active');
+    activeIdx = i;
+    if (i >= 0 && tocLinks[i]) {
+      const a = tocLinks[i].a;
+      a.classList.add('active');
+      const pr = tocList.getBoundingClientRect(), ar = a.getBoundingClientRect();
+      if (ar.top < pr.top + 4 || ar.bottom > pr.bottom - 4) a.scrollIntoView({ block: 'nearest' });
+    }
+  }
+  function updateSpy() {
+    if (!tocOpen() || !headings.length) return;
+    if (editMode && cmView) spyEdit(); else spyView();
+  }
+  function spyView() {
+    const els = content.querySelectorAll('h1,h2,h3,h4,h5,h6');
+    const lim = Math.min(els.length, headings.length);
+    let idx = 0;
+    for (let i = 0; i < lim; i++) { if (els[i].getBoundingClientRect().top <= 110) idx = i; else break; }
+    setActive(idx);
+  }
+  function spyEdit() {
+    const doc = cmView.state.doc;
+    let idx = 0;
+    for (let i = 0; i < headings.length; i++) {
+      const pos = doc.line(Math.min(doc.lines, headings[i].line + 1)).from;
+      const c = cmView.coordsAtPos(pos);
+      if (!c) continue;
+      if (c.top <= 130) idx = i; else break;
+    }
+    setActive(idx);
+  }
+  function setToc(on) {
+    document.body.classList.toggle('toc-open', on);
+    btnToc.classList.toggle('active', on);
+    localStorage.setItem('mdlive-toc', on ? '1' : '0');
+    if (on) { buildToc(); requestAnimationFrame(updateSpy); }
+  }
+  function toggleToc() { setToc(!tocOpen()); }
+  btnToc.onclick = toggleToc;
+
+  // redimensionado del panel
+  let tocW = parseInt(localStorage.getItem('mdlive-toc-w'), 10) || 270;
+  document.documentElement.style.setProperty('--toc-w', tocW + 'px');
+  tocResizer.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    if (!editMode) lastAnchor = findAnchor();
+    const startX = e.clientX, startW = tocW;
+    const move = (ev) => {
+      tocW = Math.max(160, Math.min(560, startW + (ev.clientX - startX)));
+      document.documentElement.style.setProperty('--toc-w', tocW + 'px');
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      localStorage.setItem('mdlive-toc-w', tocW);
+      if (!editMode) restoreAnchor(lastAnchor);
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  });
+
+  applyZoom();
+  if (localStorage.getItem('mdlive-width') === 'full') document.body.classList.add('full-width');
+  if (localStorage.getItem('mdlive-toc') === '1') { document.body.classList.add('toc-open'); btnToc.classList.add('active'); }
+  initMermaid();
+
+  window.__mdlive = {
+    reloadMd: () => { if (editMode) return; refreshFromDisk(false); refreshTitle(); },
+    reloadCss: reloadCss,
+  };
+
+  refreshFromDisk(true);
+  refreshTitle();
+})();
+</script>
+</body>
+</html>

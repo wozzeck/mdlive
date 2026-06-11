@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# build intermedio del bundle de CodeMirror (se regenera; el bundle final
+# vendorizado en vendor/codemirror.js sí se versiona)
+.cmbuild/
+node_modules/
+
+# varios del sistema
+.DS_Store
