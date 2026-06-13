@@ -117,6 +117,8 @@ class MdLive(Gtk.Window):
             data, mime = self._read(self.md_path, b"# No se pudo leer el fichero"), "text/plain; charset=utf-8"
         elif path == "title":
             data, mime = self.md_path.name.encode("utf-8"), "text/plain; charset=utf-8"
+        elif path == "mddir":
+            data, mime = str(self.md_path.parent).encode("utf-8"), "text/plain; charset=utf-8"
         elif path.startswith("vendor/") and ".." not in path:
             f = APP_DIR / path
             data, mime = self._read(f, b""), MIME.get(f.suffix.lower(), "application/octet-stream")

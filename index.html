@@ -97,6 +97,7 @@
   let editMode = false;
   let docSource = '';
   let cmView = null;
+  let mdDir = '';              // directorio absoluto del .md (para resolver imagenes relativas)
   let searchQuery = '';        // término de búsqueda activo (vacío = sin búsqueda)
   let setSearchEffect = null;  // StateEffect de CM para refrescar resaltado (se define al crear el editor)
 
@@ -114,15 +115,28 @@
       host.replaceWith(div);
     });
   }
-  // imagenes con ruta ABSOLUTA local o file:// -> ruta _abs/ que sirve el handler nativo.
-  // las relativas se quedan como app://local/<rel> y el handler las resuelve contra el dir del .md
+  // resuelve `rel` (con ./ y ../) contra el directorio absoluto `base`
+  function resolveAbs(base, rel) {
+    if (rel.startsWith('/')) return rel;
+    const out = [];
+    for (const p of (base + '/' + rel).split('/')) {
+      if (p === '' || p === '.') continue;
+      if (p === '..') out.pop(); else out.push(p);
+    }
+    return '/' + out.join('/');
+  }
+  // Sirve las imagenes locales por la ruta nativa _abs/. CLAVE: las rutas relativas hay que
+  // resolverlas AQUI contra el dir del .md, porque si se dejan como app://local/<rel> el
+  // navegador colapsa los ../ contra la raiz del esquema y la ruta sale mal.
   function fixImgs(root) {
     root.querySelectorAll('img').forEach((img) => {
       const s = img.getAttribute('src') || '';
-      let abs = null;
-      if (s.startsWith('file://')) abs = decodeURIComponent(s.slice('file://'.length));
-      else if (s.startsWith('/')) abs = s;
-      if (abs) img.setAttribute('src', 'app://local/_abs/' + encodeURIComponent(abs));
+      if (/^(https?:|data:|app:)/i.test(s)) return;            // externas / data / ya app:// -> dejar
+      let p = s;
+      if (p.startsWith('file://')) p = p.slice('file://'.length);
+      let dec; try { dec = decodeURIComponent(p); } catch (_) { dec = p; }
+      const abs = dec.startsWith('/') ? dec : resolveAbs(mdDir, dec);  // relativa -> contra dir del .md
+      img.setAttribute('src', 'app://local/_abs/' + encodeURIComponent(abs));
     });
   }
   function decorateSync(root) {
@@ -993,8 +1007,11 @@
     reloadCss: reloadCss,
   };
 
-  refreshFromDisk(true);
-  refreshTitle();
+  (async () => {
+    try { mdDir = (await (await fetch('app://local/mddir')).text()).replace(/\/+$/, ''); } catch (_) {}
+    refreshFromDisk(true);
+    refreshTitle();
+  })();
 })();
 </script>
 </body>
