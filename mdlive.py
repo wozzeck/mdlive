@@ -69,7 +69,7 @@ class MdLive(Gtk.Window):
         st.set_enable_write_console_messages_to_stdout(True)
         st.set_enable_smooth_scrolling(False)  # scroll directo
         self.webview.connect("decide-policy", self.on_decide_policy)
-        self.webview.connect("context-menu", lambda *a: True)  # sin menu contextual
+        self.webview.connect("context-menu", self.on_context_menu)  # solo "copiar enlace" en enlaces
         self.add(self.webview)
         self.webview.load_uri("app://local/index.html")
 
@@ -123,6 +123,19 @@ class MdLive(Gtk.Window):
             return pathlib.Path(p).read_bytes()
         except OSError:
             return fallback
+
+    # ---- menu contextual: solo "copiar enlace" cuando se pulsa sobre un enlace ----
+    def on_context_menu(self, webview, context_menu, event, hit_test_result):
+        if hit_test_result.context_is_link():
+            context_menu.remove_all()
+            try:
+                item = WebKit2.ContextMenuItem.new_from_stock_action(
+                    WebKit2.ContextMenuAction.COPY_LINK_TO_CLIPBOARD)
+                context_menu.append(item)
+            except Exception:
+                return True
+            return False  # mostrar nuestro menu minimo
+        return True  # resto: sin menu contextual
 
     # ---- enlaces externos al navegador del sistema ----------------------
     def on_decide_policy(self, webview, decision, decision_type):

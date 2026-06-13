@@ -10,7 +10,8 @@ Pensado para abrir un `.md` y verlo actualizarse al vuelo mientras lo editas con
 - **Edición WYSIWYG por bloques** (CodeMirror 6): todo el documento se ve renderizado salvo el bloque donde está el cursor, que se muestra como fuente y se resalta. Guarda directo al fichero.
 - **Índice/árbol del documento**: panel lateral con la jerarquía de encabezados, colapsable, redimensionable y con *scroll-spy* (resalta el apartado visible), tanto en visor como en editor.
 - **Buscador** (`Ctrl`+`F`): comparte el panel lateral con el índice, resalta las coincidencias en visor y editor y las lista con su número de línea; `Ctrl`+`N`/`Ctrl`+`P` navegan por todas las ocurrencias con un breve halo de localización.
-- **Chincheta** (`p`): fija en la parte superior la jerarquía de títulos de la sección visible (sticky), como la cabecera de una tabla. Con la chincheta activa, las cabeceras de las tablas largas también quedan fijas bajo la barra mientras se recorre la tabla (en el visor).
+- **Chincheta** (`p`): fija en la parte superior la jerarquía de títulos de la sección visible (sticky), como la cabecera de una tabla. Con la chincheta activa, las cabeceras de las tablas largas también quedan fijas bajo la barra mientras se recorre la tabla (en visor y editor).
+- **Enlaces**: se abren en el navegador del sistema; al pasar el ratón por encima, su destino aparece abajo a la izquierda (como un navegador); con el botón derecho, «Copiar enlace».
 - **Rendimiento en ficheros grandes**: resaltado de código y diagramas perezosos (IntersectionObserver), scroll directo.
 - **Offline**: todas las dependencias están vendorizadas en `vendor/` (markdown-it, highlight.js, mermaid, CodeMirror).
 - **Mermaid** y resaltado de sintaxis integrados.

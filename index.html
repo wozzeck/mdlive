@@ -71,6 +71,7 @@
     </div>
   </div>
 </div>
+<div id="linkbar"></div>
 
 <script src="app://local/vendor/markdown-it.min.js"></script>
 <script src="app://local/vendor/markdown-it-task-lists.min.js"></script>
@@ -947,6 +948,18 @@
   function toggleHelp() { setHelp(!helpOpen()); }
   document.getElementById('help-close').onclick = () => setHelp(false);
   helpOverlay.addEventListener('mousedown', (e) => { if (e.target === helpOverlay) setHelp(false); });
+
+  // ===== Barra de destino del enlace al hover (como un navegador) ===========
+  const linkbar = document.getElementById('linkbar');
+  const linkAt = (n) => (n && n.closest) ? n.closest('a[href]') : null;
+  document.addEventListener('mouseover', (e) => {
+    const a = linkAt(e.target);
+    if (a && a.href) { linkbar.textContent = a.getAttribute('href'); linkbar.classList.add('show'); }
+  });
+  document.addEventListener('mouseout', (e) => {
+    const a = linkAt(e.target);
+    if (a && linkAt(e.relatedTarget) !== a) linkbar.classList.remove('show');
+  });
 
   applyZoom();
   if (localStorage.getItem('mdlive-toc') === '1') { document.body.classList.add('toc-open'); btnToc.classList.add('active'); }
