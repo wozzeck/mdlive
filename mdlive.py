@@ -13,6 +13,7 @@ import os
 import sys
 import pathlib
 import subprocess
+import urllib.parse
 import gi
 
 gi.require_version("Gtk", "3.0")
@@ -27,6 +28,14 @@ MIME = {
     ".js": "text/javascript; charset=utf-8",
     ".json": "application/json; charset=utf-8",
     ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".ico": "image/x-icon",
+    ".avif": "image/avif",
     ".woff2": "font/woff2",
     ".ttf": "font/ttf",
 }
@@ -110,9 +119,16 @@ class MdLive(Gtk.Window):
             data, mime = self.md_path.name.encode("utf-8"), "text/plain; charset=utf-8"
         elif path.startswith("vendor/") and ".." not in path:
             f = APP_DIR / path
-            data, mime = self._read(f, b""), MIME.get(f.suffix, "application/octet-stream")
+            data, mime = self._read(f, b""), MIME.get(f.suffix.lower(), "application/octet-stream")
+        elif path.startswith("_abs/"):
+            # imagen por ruta absoluta o file:// (la reescribe el frontend)
+            f = pathlib.Path(urllib.parse.unquote(path[len("_abs/"):]))
+            data, mime = self._read(f, b""), MIME.get(f.suffix.lower(), "application/octet-stream")
         else:
-            data, mime = b"", "text/plain"
+            # cualquier otra cosa = recurso (imagen, etc.) relativo al directorio del .md
+            rel = urllib.parse.unquote(path)
+            f = (self.md_path.parent / rel)
+            data, mime = self._read(f, b""), MIME.get(f.suffix.lower(), "application/octet-stream")
 
         stream = Gio.MemoryInputStream.new_from_data(data)
         request.finish(stream, len(data), mime)

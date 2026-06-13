@@ -82,6 +82,13 @@
 (function () {
   const md = window.markdownit({ html: true, linkify: true, typographer: true });
   if (window.markdownitTaskLists) md.use(window.markdownitTaskLists, { enabled: true, label: true });
+  // visor LOCAL: permitir file:// (markdown-it lo bloquea por defecto); seguir bloqueando
+  // javascript:/vbscript:; data: solo imagenes
+  md.validateLink = (url) => {
+    const s = (url || '').trim().toLowerCase();
+    if (s.indexOf('file:') === 0) return true;
+    return /^(vbscript|javascript|data):/.test(s) ? /^data:image\/(gif|png|jpeg|webp);/.test(s) : true;
+  };
 
   const content = document.getElementById('content');
   const editorHost = document.getElementById('editor');
@@ -107,8 +114,20 @@
       host.replaceWith(div);
     });
   }
+  // imagenes con ruta ABSOLUTA local o file:// -> ruta _abs/ que sirve el handler nativo.
+  // las relativas se quedan como app://local/<rel> y el handler las resuelve contra el dir del .md
+  function fixImgs(root) {
+    root.querySelectorAll('img').forEach((img) => {
+      const s = img.getAttribute('src') || '';
+      let abs = null;
+      if (s.startsWith('file://')) abs = decodeURIComponent(s.slice('file://'.length));
+      else if (s.startsWith('/')) abs = s;
+      if (abs) img.setAttribute('src', 'app://local/_abs/' + encodeURIComponent(abs));
+    });
+  }
   function decorateSync(root) {
     if (!mermaidReady) initMermaid();
+    fixImgs(root);
     extractMermaid(root);
     root.querySelectorAll('.mermaid:not([data-processed])').forEach((el) => { try { window.mermaid.run({ nodes: [el] }); } catch (_) {} });
     root.querySelectorAll('pre code').forEach((b) => {
@@ -154,6 +173,7 @@
     const ratio = sc.scrollTop / Math.max(1, sc.scrollHeight - sc.clientHeight);
     queue.length = 0;
     content.innerHTML = md.render(docSource);
+    fixImgs(content);
     extractMermaid(content);
     observeLazy(content);
     sc.scrollTop = ratio * Math.max(1, sc.scrollHeight - sc.clientHeight);
