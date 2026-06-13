@@ -664,8 +664,13 @@
   }
   function refreshHeadings() { headings = parseHeadings(docSource); }
   function pinOn() { return document.body.classList.contains('pin-on'); }
+  // altura de la barra fija -> usada por el sticky de los thead de tabla (top var)
+  function setPinH() {
+    const h = (pinOn() && pinBar.classList.contains('show')) ? pinBar.offsetHeight : 0;
+    document.documentElement.style.setProperty('--pin-h', h + 'px');
+  }
   function updatePinBar(idx) {
-    if (!pinOn() || idx < 0 || !headings[idx]) { pinBar.classList.remove('show'); pinIdx = -1; return; }
+    if (!pinOn() || idx < 0 || !headings[idx]) { pinBar.classList.remove('show'); pinIdx = -1; setPinH(); return; }
     if (idx !== pinIdx) {
       pinIdx = idx;
       // cadena de ancestros (un heading por nivel) hasta el actual, incluido
@@ -685,6 +690,7 @@
       }
     }
     pinBar.classList.add('show');
+    setPinH();
   }
   function updateSpy() {
     if (!headings.length || (!tocOpen() && !pinOn())) return;
@@ -698,7 +704,7 @@
     btnPin.classList.toggle('active', on);
     localStorage.setItem('mdlive-pin', on ? '1' : '0');
     if (on) { if (!headings.length) refreshHeadings(); requestAnimationFrame(updateSpy); }
-    else { pinBar.classList.remove('show'); pinIdx = -1; }
+    else { pinBar.classList.remove('show'); pinIdx = -1; document.documentElement.style.setProperty('--pin-h', '0px'); }
   }
   btnPin.onclick = () => setPin(!pinOn());
   pinBar.addEventListener('click', () => { if (pinIdx >= 0) gotoHeading(pinIdx); });

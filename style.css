@@ -170,6 +170,10 @@ body.side-open #pin-bar { left: var(--toc-w); }
 #pin-bar .pin-h4 { font-size: 1em; }
 #pin-bar .pin-h5 { font-size: .9em; }
 #pin-bar .pin-h6 { font-size: .85em; color: var(--muted); }
+/* con la chincheta activa, las cabeceras de tabla quedan fijas bajo la barra
+   (mismo funcionamiento que los títulos); el header REAL → columnas alineadas solas.
+   --pin-h = alto de la barra (0 si no hay título fijado). z<30 para ir bajo la barra */
+body.pin-on .markdown-body thead th { position: sticky; top: var(--pin-h, 0px); z-index: 20; }
 
 /* === Panel lateral: buscador (arriba) + índice (abajo) =================== */
 :root { --toc-w: 270px; --side-split: 240px; }
