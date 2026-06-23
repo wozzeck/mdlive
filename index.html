@@ -1039,6 +1039,7 @@
   // iconos del boton copiar-ruta (estado normal / recien copiado)
   const COPY_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>';
   const CHECK_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>';
+  const DEL_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14"></path></svg>';
   // "hace ..." relativo a partir del ts (segundos epoch) de la ultima apertura
   function relTime(ts) {
     const s = Math.max(0, Date.now() / 1000 - ts);
@@ -1075,6 +1076,13 @@
       setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = COPY_SVG; btn.title = 'Copiar ruta'; }, 1200);
     }
   }
+  // quita el documento del historial (no borra el fichero) y elimina su fila del panel
+  function forgetRecent(it, row) {
+    try { window.webkit.messageHandlers.mdliveForget.postMessage(it.path); } catch (_) {}
+    row.remove();
+    if (!recentList.querySelector('.recent-item'))
+      recentList.innerHTML = '<div class="search-info">Sin documentos recientes.</div>';
+  }
   function recentOpen() { return document.body.classList.contains('recent-open'); }
   async function loadRecent() {
     let data;
@@ -1092,6 +1100,7 @@
       row.title = it.path + (it.exists ? (it.open ? ' (abierto)' : '') : ' (no encontrado)');
       row.innerHTML = '<div class="rn"><span class="dot"></span><span class="nm"></span>'
         + '<button class="rc" type="button" title="Copiar ruta" aria-label="Copiar ruta">' + COPY_SVG + '</button>'
+        + '<button class="rx" type="button" title="Quitar de recientes" aria-label="Quitar de recientes">' + DEL_SVG + '</button>'
         + '</div><div class="rd"></div><div class="rt"></div>';
       row.querySelector('.nm').textContent = it.name;
       row.querySelector('.rd').textContent = it.dir;
@@ -1102,6 +1111,7 @@
       }
       const rc = row.querySelector('.rc');
       rc.addEventListener('click', (ev) => { ev.stopPropagation(); copyPath(it.path, rc); });
+      row.querySelector('.rx').addEventListener('click', (ev) => { ev.stopPropagation(); forgetRecent(it, row); });
       if (it.exists) row.addEventListener('click', () => openRecent(it));
       frag.appendChild(row);
     }

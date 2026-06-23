@@ -72,6 +72,23 @@ def record_recent(md_path):
         pass
 
 
+def forget_recent(md_path):
+    """Elimina md_path del MRU (no toca el fichero en disco). Best-effort."""
+    p = str(md_path)
+    try:
+        if not RECENT_FILE.exists():
+            return
+        items = json.loads(RECENT_FILE.read_text(encoding="utf-8"))
+        if not isinstance(items, list):
+            return
+        items = [it for it in items if isinstance(it, dict) and it.get("path") != p]
+        tmp = RECENT_FILE.with_name("recent.json.%d.tmp" % os.getpid())
+        tmp.write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, RECENT_FILE)
+    except (ValueError, OSError):
+        pass
+
+
 def live_instances():
     """{path: {path,pid,xid}} de ventanas vivas; de paso limpia las de PIDs muertos."""
     out = {}
@@ -97,6 +114,53 @@ def live_instances():
         if d.get("path"):
             out[d["path"]] = d
     return out
+
+
+def most_recent_existing():
+    """Ruta del documento mas reciente del MRU que todavia existe en disco, o None."""
+    try:
+        items = json.loads(RECENT_FILE.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    if not isinstance(items, list):
+        return None
+    items = [it for it in items if isinstance(it, dict) and it.get("path")]
+    items.sort(key=lambda it: it.get("ts") or 0, reverse=True)  # mas reciente primero
+    for it in items:
+        if os.path.exists(it["path"]):
+            return it["path"]
+    return None
+
+
+def pick_file_dialog():
+    """Selector GTK para elegir un .md (cuando no hay historial util). None si se cancela."""
+    dlg = Gtk.FileChooserDialog(title="Abrir Markdown", action=Gtk.FileChooserAction.OPEN)
+    dlg.add_buttons("_Cancelar", Gtk.ResponseType.CANCEL, "_Abrir", Gtk.ResponseType.ACCEPT)
+    flt = Gtk.FileFilter()
+    flt.set_name("Markdown")
+    for pat in ("*.md", "*.markdown", "*.mkd", "*.mdown", "*.mdwn"):
+        flt.add_pattern(pat)
+    dlg.add_filter(flt)
+    flt_all = Gtk.FileFilter()
+    flt_all.set_name("Todos los ficheros")
+    flt_all.add_pattern("*")
+    dlg.add_filter(flt_all)
+    target = dlg.get_filename() if dlg.run() == Gtk.ResponseType.ACCEPT else None
+    dlg.destroy()
+    return target
+
+
+def display_dir(dirpath):
+    """Directorio para mostrar en el panel: '~' si es el home; relativo a el (sin '~/')
+    si cuelga del home; absoluto en cualquier otro caso. Siempre termina en '/'."""
+    home = str(pathlib.Path.home())
+    if dirpath == home:
+        d = "~"
+    elif dirpath.startswith(home + os.sep):
+        d = dirpath[len(home) + 1:]
+    else:
+        d = dirpath
+    return d if d.endswith("/") else d + "/"
 
 MIME = {
     ".html": "text/html; charset=utf-8",
@@ -151,6 +215,8 @@ class MdLive(Gtk.Window):
         self.ucm.connect("script-message-received::mdliveOpen", self.on_open_message)
         self.ucm.register_script_message_handler("mdliveCopy")
         self.ucm.connect("script-message-received::mdliveCopy", self.on_copy_message)
+        self.ucm.register_script_message_handler("mdliveForget")
+        self.ucm.connect("script-message-received::mdliveForget", self.on_forget_message)
 
         self.webview = WebKit2.WebView.new_with_user_content_manager(self.ucm)
         st = self.webview.get_settings()
@@ -205,6 +271,18 @@ class MdLive(Gtk.Window):
             cb.store()  # conservar el contenido tras cerrar la ventana
         except Exception as e:
             print("mdlive: no se pudo copiar al portapapeles: %s" % e, file=sys.stderr)
+
+    # ---- quitar un documento del historial de recientes (peticion del panel) ----
+    def on_forget_message(self, ucm, js_result):
+        try:
+            target = js_result.get_js_value().to_string()
+        except Exception:
+            try:
+                target = js_result.get_value().to_string()
+            except Exception:
+                return
+        if target:
+            forget_recent(target)
 
     # ---- registro de instancias vivas (para enfocar la ventana ya abierta) ----
     def _register_instance(self):
@@ -284,7 +362,7 @@ class MdLive(Gtk.Window):
             items.append({
                 "path": p,
                 "name": it.get("name") or os.path.basename(p),
-                "dir": os.path.dirname(p).replace(str(pathlib.Path.home()), "~", 1),
+                "dir": display_dir(os.path.dirname(p)),
                 "exists": os.path.exists(p),
                 "open": p in live,
                 "ts": it.get("ts"),
@@ -405,13 +483,17 @@ class MdLive(Gtk.Window):
 def main():
     GLib.set_prgname("mdlive")
     GLib.set_application_name("mdlive")
-    if len(sys.argv) < 2:
-        print("Uso: mdlive <archivo.md>", file=sys.stderr)
-        sys.exit(1)
-    if not os.path.exists(sys.argv[1]):
-        print("No existe: %s" % sys.argv[1], file=sys.stderr)
-        sys.exit(1)
-    win = MdLive(sys.argv[1])
+    if len(sys.argv) >= 2:
+        target = sys.argv[1]
+        if not os.path.exists(target):
+            print("No existe: %s" % target, file=sys.stderr)
+            sys.exit(1)
+    else:
+        # sin fichero (p.ej. icono del menu): abrir el mas reciente; si no hay, selector
+        target = most_recent_existing() or pick_file_dialog()
+        if not target:
+            sys.exit(0)  # historial vacio y dialogo cancelado: nada que abrir
+    win = MdLive(target)
     win.show_all()
     Gtk.main()
 

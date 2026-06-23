@@ -245,25 +245,30 @@ body.recent-open #recent-sec { display: flex; }
 .recent-item.open { border-left-color: var(--link); }
 .recent-item.current { background: rgba(9,105,218,.10); cursor: default; }
 .recent-item.missing { opacity: .5; cursor: default; }
-.recent-item .rn { display: flex; align-items: center; gap: .45em; font-size: 13px; color: var(--fg);
+.recent-item .rn { display: flex; align-items: center; gap: 0; font-size: 13px; color: var(--fg);
   white-space: nowrap; overflow: hidden; }
 .recent-item .rn .nm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* boton copiar-ruta: discreto, aparece al pasar el raton por la fila */
-.recent-item .rn .rc { flex: 0 0 auto; margin-left: .35em; display: inline-flex; align-items: center;
-  justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px;
-  background: transparent; color: var(--muted); cursor: pointer; opacity: 0;
-  transition: opacity .12s, background .12s, color .12s; }
-.recent-item:hover .rn .rc { opacity: .6; }
+/* acciones por fila (copiar ruta / quitar de recientes): ocultas y SIN ocupar hueco
+   (ancho 0); se despliegan a 22px al pasar el raton, asi el nombre usa todo el ancho */
+.recent-item .rn .rc, .recent-item .rn .rx { flex: 0 0 auto; display: inline-flex; align-items: center;
+  justify-content: center; width: 0; height: 22px; margin: 0; padding: 0; border: 0; border-radius: 5px;
+  background: transparent; color: var(--muted); cursor: pointer; opacity: 0; overflow: hidden;
+  transition: width .12s, opacity .12s, margin .12s, background .12s, color .12s; }
+.recent-item:hover .rn .rc, .recent-item:hover .rn .rx { width: 22px; opacity: .55; }
+.recent-item:hover .rn .rc { margin-left: .3em; }
+.recent-item:hover .rn .rx { margin-left: 1px; }
 .recent-item .rn .rc:hover { opacity: 1; background: rgba(127,127,127,.18); color: var(--fg); }
-.recent-item .rn .rc.copied { opacity: 1; color: var(--link); }
-.recent-item .rn .rc svg { display: block; }
+.recent-item .rn .rx:hover { opacity: 1; background: rgba(220,53,69,.16); color: #dc3545; }
+.recent-item .rn .rc.copied { width: 22px; opacity: 1; margin-left: .3em; color: var(--link); }
+.recent-item .rn .rc svg, .recent-item .rn .rx svg { display: block; }
 /* punto = documento abierto ahora mismo (en otra ventana) */
-.recent-item .rn .dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--link); visibility: hidden; }
+.recent-item .rn .dot { flex: 0 0 auto; width: 7px; height: 7px; margin-right: .45em; border-radius: 50%; background: var(--link); visibility: hidden; }
 .recent-item.open .rn .dot { visibility: visible; }
 .recent-item.current .rn .dot { background: var(--muted); visibility: visible; }
 /* ruta: … a la izquierda para conservar la parte final, más informativa */
 .recent-item .rd { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis; direction: rtl; text-align: left; margin-left: calc(7px + .45em); }
+  text-overflow: ellipsis; direction: rtl; text-align: left; unicode-bidi: plaintext;
+  margin-left: calc(7px + .45em); }
 /* fecha de ultima apertura: "hace ..." + fecha absoluta */
 .recent-item .rt { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; margin-left: calc(7px + .45em); margin-top: .12em; opacity: .85; }
