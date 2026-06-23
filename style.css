@@ -183,8 +183,8 @@ body.pin-on .markdown-body table { overflow: visible; }
    el overflow: el scroll pasa a la ventana y el sticky se ancla al viewport (como el visor) */
 body.pin-on .cm-editor .cm-scroller { overflow: visible; }
 
-/* === Panel lateral: buscador (arriba) + índice (abajo) =================== */
-:root { --toc-w: 270px; --side-split: 240px; }
+/* === Panel lateral: buscador + índice + recientes (apilables) ============ */
+:root { --toc-w: 270px; }
 /* el panel se muestra si hay buscador o índice; desplaza el contenido (no tapa) */
 body.side-open { padding-left: var(--toc-w); }
 #side-panel { display: none; }
@@ -194,22 +194,17 @@ body.side-open #side-panel {
   background: var(--alt-bg); border-right: 1px solid var(--border);
   z-index: 45; box-shadow: 0 0 12px rgba(0,0,0,.06);
 }
-/* secciones */
-#search-sec, #toc-sec { display: none; flex-direction: column; min-height: 0; }
+/* secciones: visibles según body.<key>-open; reparto vertical proporcional (flex-grow lo fija el JS) */
+#search-sec, #toc-sec, #recent-sec { display: none; flex-direction: column; min-height: 64px; overflow: hidden; }
 body.search-open #search-sec { display: flex; }
-body.toc-open #toc-sec { display: flex; }
-/* reparto vertical: solo uno -> ocupa todo; ambos -> buscador altura var, resto indice */
-body.search-open:not(.toc-open) #search-sec { flex: 1 1 auto; }
-body.toc-open:not(.search-open) #toc-sec { flex: 1 1 auto; }
-body.search-open.toc-open #search-sec { flex: 0 0 var(--side-split); }
-body.search-open.toc-open #toc-sec { flex: 1 1 auto; }
-/* divisor vertical entre secciones (solo con ambas activas) */
-#side-vdivider { display: none; }
-body.search-open.toc-open #side-vdivider {
-  display: block; flex: 0 0 auto; height: 7px; cursor: row-resize;
-  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--alt-bg);
-}
-#side-vdivider:hover { background: rgba(9,105,218,.18); }
+body.toc-open    #toc-sec    { display: flex; }
+body.recent-open #recent-sec { display: flex; }
+#side-panel > section { flex: 1 1 0; }
+/* divisor horizontal entre dos secciones visibles (el JS lo coloca y lo muestra) */
+.side-divider { display: none; flex: 0 0 7px; height: 7px; cursor: row-resize;
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--alt-bg); }
+.side-divider.show { display: block; }
+.side-divider:hover { background: rgba(9,105,218,.18); }
 /* cabecera de seccion (titulo o campo) */
 .side-head {
   flex: 0 0 auto; padding: .55rem .7rem; border-bottom: 1px solid var(--border);
@@ -243,18 +238,35 @@ body.search-open.toc-open #side-vdivider {
   background: #fde047; color: inherit; border-radius: 2px; padding: 0 .5px;
 }
 .search-info { color: var(--muted); font-style: italic; padding: .5rem .7rem; font-size: 12.5px; }
+/* lista de documentos recientes */
+#recent-list { padding: .2rem 0 .5rem; }
+.recent-item { padding: .28em .7rem; cursor: pointer; border-left: 2px solid transparent; min-width: 0; }
+.recent-item:hover { background: rgba(127,127,127,.12); }
+.recent-item.open { border-left-color: var(--link); }
+.recent-item.current { background: rgba(9,105,218,.10); cursor: default; }
+.recent-item.missing { opacity: .5; cursor: default; }
+.recent-item .rn { display: flex; align-items: center; gap: .45em; font-size: 13px; color: var(--fg);
+  white-space: nowrap; overflow: hidden; }
+.recent-item .rn .nm { overflow: hidden; text-overflow: ellipsis; }
+/* punto = documento abierto ahora mismo (en otra ventana) */
+.recent-item .rn .dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--link); visibility: hidden; }
+.recent-item.open .rn .dot { visibility: visible; }
+.recent-item.current .rn .dot { background: var(--muted); visibility: visible; }
+/* ruta: … a la izquierda para conservar la parte final, más informativa */
+.recent-item .rd { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; direction: rtl; text-align: left; margin-left: calc(7px + .45em); }
 /* resaltado de busqueda en el bloque en edicion (mark de CodeMirror) */
 .cm-search-hit { background: #fde047; border-radius: 2px; }
 /* halo breve y discreto que decrece ligeramente hasta el recuadro de la coincidencia
    (mismo amarillo del resaltado); solo para localizarla con la vista al navegar */
 .mdlive-halo {
   position: fixed; pointer-events: none; z-index: 60;
-  border-radius: 3px; background: #fde047;
+  border-radius: 4px; background: #fde047;
   transform-origin: center;
-  animation: mdlive-halo .35s ease-out forwards;
+  animation: mdlive-halo .5s ease-out forwards;
 }
 @keyframes mdlive-halo {
-  0%   { transform: scale(1.9); opacity: .6; }
+  0%   { transform: scale(3.2); opacity: .65; }
   100% { transform: scale(1);   opacity: 0; }
 }
 /* === Índice ============================================================== */
@@ -322,3 +334,54 @@ body.help-open #help-overlay { display: flex; align-items: center; justify-conte
   pointer-events: none; box-shadow: 0 -1px 6px rgba(0,0,0,.08);
 }
 #linkbar.show { display: block; }
+
+/* === Minimapa del documento (estilo Sublime) ============================= */
+:root { --minimap-w: 170px; --mm-sbw: 0px; }
+#minimap { display: none; }
+/* solo en modo lectura; reserva su ancho a la derecha (no tapa el contenido) */
+body.minimap-on:not(.edit-mode) { padding-right: var(--minimap-w); }
+body.minimap-on:not(.edit-mode) #minimap {
+  display: block; position: fixed; top: 0; right: 0; bottom: 0;
+  width: var(--minimap-w); overflow: hidden; z-index: 40;
+  background: var(--alt-bg); border-left: 1px solid var(--border);
+  cursor: pointer; user-select: none;
+}
+/* lienzo: clon del documento a escala (instantánea), inerte */
+#minimap-canvas {
+  position: absolute; top: 0; left: 0;
+  transform-origin: top left; pointer-events: none; will-change: transform;
+}
+/* el clon va fuera de pantalla: content-visibility:auto dejaría los diagramas mermaid en
+   blanco y reservaría alturas falsas (320px) -> forzar pintado y alto real en el minimapa */
+#minimap-canvas .mermaid { content-visibility: visible; contain-intrinsic-size: auto; }
+/* recuadro de la porción visible, por encima del lienzo */
+#minimap-viewport {
+  position: absolute; left: 0; right: 0; z-index: 1; pointer-events: none;
+  box-sizing: border-box;
+  background: rgba(9,105,218,.14); border: 1px solid rgba(9,105,218,.55);
+}
+body.minimap-on:not(.edit-mode) #minimap:hover #minimap-viewport { background: rgba(9,105,218,.22); }
+/* marcas de las coincidencias de búsqueda sobre el minimapa (regla tipo Sublime) */
+#minimap-marks { position: absolute; top: 0; left: 0; right: 0; z-index: 2; pointer-events: none; transform-origin: top left; will-change: transform; }
+#minimap-marks .mm-mark { position: absolute; left: 0; right: 0; height: 2px; background: #f97316; box-shadow: 0 0 0 .5px rgba(249,115,22,.45); }
+/* el resaltado dentro del clon usa el mismo amarillo del documento (no el de la UA) */
+#minimap-canvas mark.search-hit { background: #fde047; color: inherit; }
+/* tirador de redimensionado en el borde izquierdo del minimapa */
+#minimap-resizer { display: none; }
+body.minimap-on:not(.edit-mode) #minimap-resizer {
+  display: block; position: fixed; top: 0; bottom: 0; right: var(--minimap-w);
+  width: 7px; z-index: 46; cursor: col-resize;
+}
+body.minimap-on:not(.edit-mode) #minimap-resizer:hover { background: linear-gradient(to right, transparent, rgba(9,105,218,.28)); }
+/* === Gutter: regla de coincidencias cuando el minimapa está apagado ======= */
+#minimap-gutter { display: none; }
+body:not(.minimap-on):not(.edit-mode) #minimap-gutter.show {
+  display: block; position: fixed; top: 0; bottom: 0; right: var(--mm-sbw, 0);
+  width: 10px; z-index: 39; cursor: pointer;
+  background: var(--alt-bg); border-left: 1px solid var(--border);
+}
+#minimap-gutter .gm { position: absolute; left: 1px; right: 1px; height: 2px; background: #f97316; box-shadow: 0 0 0 .5px rgba(249,115,22,.45); }
+/* los toggles quedan FIJOS sobre el minimapa (z-index 50 > 40), no se desplazan;
+   solo la chincheta (barra de contenido) se acorta para no solaparse */
+body.minimap-on:not(.edit-mode) #pin-bar { right: var(--minimap-w); }
+#btn-minimap.active { background: var(--link); color: #fff; border-color: var(--link); }

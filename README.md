@@ -9,7 +9,9 @@ Pensado para abrir un `.md` y verlo actualizarse al vuelo mientras lo editas con
 - **Live reload**: si el `.md` cambia en disco, la vista se refresca al instante (también recarga `style.css` e `index.html` en caliente).
 - **Edición WYSIWYG por bloques** (CodeMirror 6): todo el documento se ve renderizado salvo el bloque donde está el cursor, que se muestra como fuente y se resalta. Guarda directo al fichero.
 - **Índice/árbol del documento**: panel lateral con la jerarquía de encabezados, colapsable, redimensionable y con *scroll-spy* (resalta el apartado visible), tanto en visor como en editor.
+- **Minimapa** (`m`): miniatura a escala de todo el documento en la parte derecha (estilo Sublime Text), con un recuadro que marca la ventana visible y se mueve con el scroll; haz clic o arrastra sobre la miniatura para navegar. Ancho ajustable con un tirador en su borde izquierdo (se recuerda). Las coincidencias de la búsqueda se marcan sobre el minimapa; con el minimapa apagado, aparecen en una franja fina a la derecha. Solo en modo lectura.
 - **Buscador** (`Ctrl`+`F`): comparte el panel lateral con el índice, resalta las coincidencias en visor y editor y las lista con su número de línea; `Ctrl`+`N`/`Ctrl`+`P` navegan por todas las ocurrencias con un breve halo de localización.
+- **Documentos recientes** (`r`): panel lateral con los últimos 50 documentos abiertos (más reciente arriba). Un clic abre el documento en una **ventana nueva** o, si ya está abierto, **enfoca** su ventana (punto azul = abierto ahora). Comparte el panel con el índice y el buscador (secciones apilables y redimensionables). El historial es común a todas las ventanas.
 - **Chincheta** (`p`): fija en la parte superior la jerarquía de títulos de la sección visible (sticky), como la cabecera de una tabla. Con la chincheta activa, las cabeceras de las tablas largas también quedan fijas bajo la barra mientras se recorre la tabla (en visor y editor).
 - **Enlaces**: se abren en el navegador del sistema; al pasar el ratón por encima, su destino aparece abajo a la izquierda (como un navegador); con el botón derecho, «Copiar enlace».
 - **Rendimiento en ficheros grandes**: resaltado de código y diagramas perezosos (IntersectionObserver), scroll directo.
@@ -42,6 +44,8 @@ sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1
 | Tecla | Acción |
 |-------|--------|
 | `t` | Mostrar/ocultar el índice del documento |
+| `m` | Mostrar/ocultar el minimapa del documento |
+| `r` | Documentos recientes (abrir en ventana nueva o enfocar la existente) |
 | `p` | Fijar (chincheta) los títulos de sección al hacer scroll |
 | `Ctrl`+`F` | Buscador |
 | `Ctrl`+`N` / `Ctrl`+`P` | Ir a la siguiente / anterior coincidencia |
@@ -89,3 +93,5 @@ xdg-mime default mdlive.desktop text/markdown
 ## Notas
 
 El bundle de CodeMirror (`vendor/codemirror.js`) se construye con esbuild a partir de `@codemirror/{state,view,commands,language,lang-markdown}` exponiendo `window.CM`; el directorio de build (`.cmbuild/`) no se versiona, pero el bundle final sí.
+
+El historial de **documentos recientes** se guarda en `$XDG_DATA_HOME/mdlive/recent.json` (por defecto `~/.local/share/mdlive/recent.json`). Cada ventana publica además su existencia en `$XDG_RUNTIME_DIR/mdlive/instances/` (efímero) para poder enfocar la ventana ya abierta en lugar de duplicarla; ese enfoque usa `wmctrl` (o `xdotool` como alternativa) en X11.

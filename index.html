@@ -18,6 +18,8 @@
   <button id="btn-toc" title="Índice del documento (tecla t)">&#9776;</button>
   <button id="btn-pin" title="Fijar el título de la sección al hacer scroll (tecla p)">&#128204;</button>
   <button id="btn-search" title="Buscar (Ctrl+F)">&#128269;</button>
+  <button id="btn-minimap" title="Minimapa del documento (tecla m)">&#128506;&#65039;</button>
+  <button id="btn-recent" title="Documentos recientes (tecla r)">&#128344;</button>
   <button id="btn-edit" title="Modo edición (tecla e)">&#9999;&#65039;</button>
 </div>
 <div id="pin-bar" title="Ir a la sección"></div>
@@ -26,15 +28,28 @@
     <div class="side-head"><input id="search-input" type="search" placeholder="Buscar…" autocomplete="off" spellcheck="false"></div>
     <div id="search-results" class="side-body"></div>
   </section>
-  <div id="side-vdivider" title="Arrastrar para redimensionar"></div>
   <section id="toc-sec">
     <div class="side-head">Índice</div>
     <nav id="toc-list" class="side-body"></nav>
   </section>
+  <section id="recent-sec">
+    <div class="side-head">Recientes</div>
+    <div id="recent-list" class="side-body"></div>
+  </section>
+  <!-- divisores horizontales reutilizables: el JS los coloca entre secciones visibles -->
+  <div class="side-divider" id="side-div-0" title="Arrastrar para redimensionar"></div>
+  <div class="side-divider" id="side-div-1" title="Arrastrar para redimensionar"></div>
   <div id="toc-resizer" title="Arrastrar para redimensionar el ancho"></div>
 </aside>
 <article id="content" class="markdown-body"></article>
 <div id="editor" style="display:none"></div>
+<div id="minimap" aria-hidden="true">
+  <div id="minimap-canvas"></div>
+  <div id="minimap-marks"></div>
+  <div id="minimap-viewport"></div>
+</div>
+<div id="minimap-resizer" title="Arrastrar para redimensionar el minimapa"></div>
+<div id="minimap-gutter" title="Coincidencias de la búsqueda"></div>
 
 <div id="help-overlay" aria-hidden="true">
   <div id="help-modal" role="dialog" aria-modal="true" aria-label="Atajos de teclado">
@@ -46,6 +61,8 @@
         <table>
           <tr><td><kbd>t</kbd></td><td>Índice del documento</td></tr>
           <tr><td><kbd>p</kbd></td><td>Fijar títulos (chincheta)</td></tr>
+          <tr><td><kbd>m</kbd></td><td>Minimapa del documento</td></tr>
+          <tr><td><kbd>r</kbd></td><td>Documentos recientes</td></tr>
           <tr><td><kbd>e</kbd></td><td>Modo edición</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Buscar</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd> / <kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Coincidencia siguiente / anterior</td></tr>
@@ -194,6 +211,8 @@
     if (searchQuery) highlightInElement(content, searchQuery);
     if (tocOpen()) buildToc(); else if (pinOn()) refreshHeadings();
     if (tocOpen() || pinOn()) requestAnimationFrame(updateSpy);
+    scheduleMinimapBuild();
+    renderGutterMarks();
   }
   let lastFetched = null;
   async function refreshFromDisk(force) {
@@ -501,6 +520,8 @@
     const l = document.getElementById('usercss');
     const u = new URL(l.getAttribute('href'), location.href);
     u.searchParams.set('t', Date.now());
+    // el CSS editado puede cambiar --minimap-w o el ancho del contenido -> rehacer al aplicar
+    l.addEventListener('load', () => { if (minimapOn() && !editMode) scheduleMinimapBuild(); }, { once: true });
     l.setAttribute('href', u.toString());
   }
   async function refreshTitle() { try { document.title = (await (await fetch('app://local/title')).text()) + ' — mdlive'; } catch (_) {} }
@@ -519,8 +540,8 @@
     sc.scrollTop = (sc.scrollTop + r.top + a.frac * r.height) - window.innerHeight / 2;
   }
   let lastAnchor = null, scrollTick = false, resizeTick = false, spyTick = false;
-  addEventListener('scroll', () => { if (scrollTick) return; scrollTick = true; requestAnimationFrame(() => { if (!editMode) lastAnchor = findAnchor(); updateSpy(); scrollTick = false; }); }, { passive: true });
-  addEventListener('resize', () => { if (resizeTick) return; resizeTick = true; requestAnimationFrame(() => { if (!editMode) restoreAnchor(lastAnchor); resizeTick = false; }); });
+  addEventListener('scroll', () => { if (scrollTick) return; scrollTick = true; requestAnimationFrame(() => { if (!editMode) lastAnchor = findAnchor(); updateSpy(); updateMinimap(); scrollTick = false; }); }, { passive: true });
+  addEventListener('resize', () => { if (resizeTick) return; resizeTick = true; requestAnimationFrame(() => { if (!editMode) restoreAnchor(lastAnchor); updateScrollbarW(); onMinimapResize(); renderGutterMarks(); resizeTick = false; }); });
   // el editor CM puede tener su propio scroller -> mismo spy, con su throttle
   function onAnyScroll() { if (spyTick) return; spyTick = true; requestAnimationFrame(() => { updateSpy(); spyTick = false; }); }
 
@@ -533,7 +554,7 @@
     const a = editMode ? null : findAnchor();
     const d = Math.max(-0.2, Math.min(0.2, zPending)); zPending = 0;
     zoom = Math.max(0.5, Math.min(4, +(zoom + d).toFixed(3)));
-    applyZoom(); restoreAnchor(a);
+    applyZoom(); restoreAnchor(a); scheduleMinimapBuild();
   }
   addEventListener('wheel', (e) => { if (!e.ctrlKey) return; e.preventDefault(); zPending += (e.deltaY < 0 ? 0.1 : -0.1); if (!zScheduled) { zScheduled = true; requestAnimationFrame(flushZoom); } }, { passive: false });
 
@@ -552,6 +573,8 @@
     if (e.key === 'e') { e.preventDefault(); setEditMode(true); }
     else if (e.key === 't') { e.preventDefault(); toggleToc(); }
     else if (e.key === 'p') { e.preventDefault(); setPin(!pinOn()); }
+    else if (e.key === 'm') { e.preventDefault(); toggleMinimap(); }
+    else if (e.key === 'r') { e.preventDefault(); toggleRecent(); }
   });
 
   // ===== Índice / árbol del documento =======================================
@@ -769,6 +792,7 @@
       document.removeEventListener('mouseup', up);
       localStorage.setItem('mdlive-toc-w', tocW);
       if (!editMode) restoreAnchor(lastAnchor);
+      scheduleMinimapBuild();   // el ancho del contenido cambió -> reconstruir el minimapa
     };
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up);
@@ -778,13 +802,15 @@
   const btnSearch = document.getElementById('btn-search');
   const searchInput = document.getElementById('search-input');
   const searchResults = document.getElementById('search-results');
-  const sideVdivider = document.getElementById('side-vdivider');
   let searchTimer = null;
   let searchHits = [];   // [{line, col, row}] en orden de documento (una por línea coincidente)
   let searchCur = -1;    // resultado activo (para Ctrl+N / Ctrl+P)
 
   function searchOpen() { return document.body.classList.contains('search-open'); }
-  function updateSideOpen() { document.body.classList.toggle('side-open', tocOpen() || searchOpen()); }
+  function updateSideOpen() {
+    document.body.classList.toggle('side-open', tocOpen() || searchOpen() || recentOpen());
+    relayoutSide();
+  }
   function escHtml(s) { return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 
   // resalta todas las ocurrencias de q (substring, case-insensitive) en root, envolviéndolas
@@ -878,6 +904,9 @@
     } else {
       clearHighlights(content);
       if (q) highlightInElement(content, q);
+      scheduleMinimapBuild();   // refresca el resaltado dentro del clon del minimapa
+      renderMinimapMarks();     // marcas sobre el minimapa (si está activo)
+      renderGutterMarks();      // o sobre el gutter (si el minimapa está apagado)
     }
   }
 
@@ -886,8 +915,8 @@
     if (!rect) return;
     const el = document.createElement('div');
     el.className = 'mdlive-halo';
-    el.style.left = rect.left + 'px'; el.style.top = rect.top + 'px';
-    el.style.width = Math.max(2, rect.width) + 'px'; el.style.height = Math.max(2, rect.height) + 'px';
+    el.style.left = (rect.left - 6) + 'px'; el.style.top = (rect.top - 4) + 'px';
+    el.style.width = (Math.max(2, rect.width) + 12) + 'px'; el.style.height = (Math.max(2, rect.height) + 8) + 'px';
     document.body.appendChild(el);
     const done = () => el.remove();
     el.addEventListener('animationend', done);
@@ -957,23 +986,96 @@
     else if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); if (searchHits.length) gotoHit((searchCur - 1 + searchHits.length) % searchHits.length, false); }
   });
 
-  // divisor vertical: alto del buscador cuando coexiste con el índice
-  const savedSplit = localStorage.getItem('mdlive-side-split');
-  if (savedSplit) document.documentElement.style.setProperty('--side-split', savedSplit);
-  sideVdivider.addEventListener('mousedown', (e) => {
+  // ===== Reparto vertical del panel (N secciones apilables) =================
+  // Secciones en orden de apilado. Cada una visible si body tiene su clase `<key>-open`.
+  // El reparto usa flex-grow (peso) por sección -> proporcional al redimensionar la ventana.
+  const SIDE_SECS = [
+    ['search', document.getElementById('search-sec')],
+    ['toc', document.getElementById('toc-sec')],
+    ['recent', document.getElementById('recent-sec')],
+  ];
+  const sideDividers = [document.getElementById('side-div-0'), document.getElementById('side-div-1')];
+  function sideGrow(key) { const w = parseFloat(localStorage.getItem('mdlive-grow-' + key)); return (w && w > 0) ? w : 1; }
+  // coloca un divisor entre cada par de secciones visibles consecutivas y aplica pesos
+  function relayoutSide() {
+    for (const [key, el] of SIDE_SECS) { if (el) el.style.flexGrow = String(sideGrow(key)); }
+    const vis = SIDE_SECS.filter(([key, el]) => el && document.body.classList.contains(key + '-open'));
+    sideDividers.forEach((d) => d && d.classList.remove('show'));
+    for (let i = 0; i < vis.length - 1 && i < sideDividers.length; i++) {
+      const d = sideDividers[i];
+      d.dataset.above = vis[i][0];
+      d.dataset.below = vis[i + 1][0];
+      vis[i + 1][1].insertAdjacentElement('beforebegin', d);
+      d.classList.add('show');
+    }
+  }
+  // arrastre: traslada peso entre las dos secciones adyacentes (las demás no cambian)
+  sideDividers.forEach((d) => d && d.addEventListener('mousedown', (e) => {
     e.preventDefault();
-    const sec = document.getElementById('search-sec');
-    const startY = e.clientY, startH = sec.getBoundingClientRect().height;
+    const A = document.getElementById(d.dataset.above + '-sec');
+    const B = document.getElementById(d.dataset.below + '-sec');
+    if (!A || !B) return;
+    const startY = e.clientY, hA0 = A.offsetHeight, hB0 = B.offsetHeight;
+    const gA0 = parseFloat(getComputedStyle(A).flexGrow) || 1;
+    const gB0 = parseFloat(getComputedStyle(B).flexGrow) || 1;
+    const sumG = gA0 + gB0, sumH = Math.max(1, hA0 + hB0), MIN = 64;
     const move = (ev) => {
-      const h = Math.max(90, Math.min(window.innerHeight - 160, startH + (ev.clientY - startY)));
-      document.documentElement.style.setProperty('--side-split', h + 'px');
+      const dy = Math.max(-(hA0 - MIN), Math.min(hB0 - MIN, ev.clientY - startY));
+      const fracA = (hA0 + dy) / sumH;
+      A.style.flexGrow = String(sumG * fracA);
+      B.style.flexGrow = String(sumG * (1 - fracA));
     };
     const up = () => {
       document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
-      localStorage.setItem('mdlive-side-split', getComputedStyle(document.documentElement).getPropertyValue('--side-split').trim());
+      localStorage.setItem('mdlive-grow-' + d.dataset.above, A.style.flexGrow);
+      localStorage.setItem('mdlive-grow-' + d.dataset.below, B.style.flexGrow);
     };
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
-  });
+  }));
+
+  // ===== Documentos recientes ==============================================
+  const btnRecent = document.getElementById('btn-recent');
+  const recentList = document.getElementById('recent-list');
+  function recentOpen() { return document.body.classList.contains('recent-open'); }
+  async function loadRecent() {
+    let data;
+    try { data = await (await fetch('app://local/recent', { cache: 'no-store' })).json(); }
+    catch (_) { recentList.innerHTML = '<div class="search-info">No se pudo cargar.</div>'; return; }
+    const cur = data.current || '', items = data.items || [];
+    if (!items.length) { recentList.innerHTML = '<div class="search-info">Sin documentos recientes.</div>'; return; }
+    const frag = document.createDocumentFragment();
+    for (const it of items) {
+      const row = document.createElement('div');
+      row.className = 'recent-item'
+        + (it.open ? ' open' : '')
+        + (it.path === cur ? ' current' : '')
+        + (it.exists ? '' : ' missing');
+      row.title = it.path + (it.exists ? (it.open ? ' (abierto)' : '') : ' (no encontrado)');
+      row.innerHTML = '<div class="rn"><span class="dot"></span><span class="nm"></span></div><div class="rd"></div>';
+      row.querySelector('.nm').textContent = it.name;
+      row.querySelector('.rd').textContent = it.dir;
+      if (it.exists) row.addEventListener('click', () => openRecent(it));
+      frag.appendChild(row);
+    }
+    recentList.innerHTML = '';
+    recentList.appendChild(frag);
+  }
+  function openRecent(it) {
+    try { window.webkit.messageHandlers.mdliveOpen.postMessage(it.path); } catch (_) {}
+    // tras abrir/enfocar, el estado "abierto" puede cambiar -> refresca los indicadores
+    setTimeout(loadRecent, 400);
+  }
+  function setRecent(on) {
+    document.body.classList.toggle('recent-open', on);
+    btnRecent.classList.toggle('active', on);
+    updateSideOpen();
+    localStorage.setItem('mdlive-recent', on ? '1' : '0');
+    if (on) loadRecent();
+  }
+  function toggleRecent() { setRecent(!recentOpen()); }
+  btnRecent.onclick = toggleRecent;
+  // al volver el foco a esta ventana, refresca los indicadores de "abierto"
+  addEventListener('focus', () => { if (recentOpen()) loadRecent(); });
 
   // ===== Modal de ayuda (Ctrl+H) ============================================
   const helpOverlay = document.getElementById('help-overlay');
@@ -995,10 +1097,227 @@
     if (a && linkAt(e.relatedTarget) !== a) linkbar.classList.remove('show');
   });
 
+  // ===== Minimapa del documento (estilo Sublime) ============================
+  // Clon a escala de TODO el documento renderizado (instantánea) en un panel fijo a
+  // la derecha, con un recuadro que marca la ventana visible y permite navegar.
+  const minimap = document.getElementById('minimap');
+  const minimapCanvas = document.getElementById('minimap-canvas');
+  const minimapViewport = document.getElementById('minimap-viewport');
+  const minimapMarks = document.getElementById('minimap-marks');
+  const minimapResizer = document.getElementById('minimap-resizer');
+  const minimapGutter = document.getElementById('minimap-gutter');
+  const btnMinimap = document.getElementById('btn-minimap');
+  let mmScale = 0;        // factor px-documento -> px-minimapa (depende del ancho)
+  let mmTranslate = 0;    // desplazamiento vertical del lienzo dentro del panel
+  let mmTy = 0;           // translateY aplicado (entero, compartido por lienzo y marcas)
+  let mmLastW = 0;        // ancho de contenido del último build (para evitar re-clonar en resize)
+  let mmBuildTimer = null;
+  let mmDragging = false;
+
+  function minimapOn() { return document.body.classList.contains('minimap-on'); }
+
+  // Reconstruye el clon escalado (operación cara: clona el DOM -> debounced).
+  function buildMinimap() {
+    if (!minimapOn() || editMode) { minimapCanvas.innerHTML = ''; return; }
+    const rect = content.getBoundingClientRect();
+    const w = rect.width;
+    if (!w || !content.firstChild) { minimapCanvas.innerHTML = ''; return; }
+    mmScale = minimap.clientWidth / w;
+    mmLastW = w;
+    // instantánea del documento; el clon es inerte (pointer-events:none en CSS)
+    const clone = content.cloneNode(true);
+    clone.removeAttribute('id');
+    // quita TODOS los ids del clon: evita ids duplicados en el DOM; las refs url(#..)
+    // de los SVG de mermaid resuelven contra los originales (que sí conservan su id)
+    clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
+    clone.style.boxSizing = 'border-box';  // border-box + ancho real => mismo wrapping/alto
+    clone.style.width = w + 'px';
+    clone.style.maxWidth = 'none';
+    minimapCanvas.innerHTML = '';
+    minimapCanvas.appendChild(clone);
+    minimapCanvas.style.width = w + 'px';
+    updateMinimap();
+    renderMinimapMarks();
+  }
+  function scheduleMinimapBuild() {
+    if (!minimapOn() || editMode) return;
+    clearTimeout(mmBuildTimer);
+    mmBuildTimer = setTimeout(() => requestAnimationFrame(buildMinimap), 120);
+  }
+  // Resize que NO cambia el ancho del contenido (solo el alto del viewport): basta
+  // recomputar la geometría, el clon no cambia. Si cambia el ancho, reconstruye.
+  function onMinimapResize() {
+    if (!minimapOn() || editMode) return;
+    const w = content.getBoundingClientRect().width;
+    if (mmScale && w === mmLastW) updateMinimap();
+    else scheduleMinimapBuild();
+  }
+  // Recuadro de la ventana visible + desplazamiento del lienzo (barato: solo transforms).
+  // El lienzo se transforma con `translateY(t) scale(s)` => cssY = t + s*docY; por eso el
+  // recuadro va en top = scrollTop*s + t y, para documentos altos, el lienzo se desplaza
+  // bajo el recuadro (que recorre el panel de arriba a abajo), igual que en Sublime/VSCode.
+  function updateMinimap() {
+    if (!minimapOn() || editMode || !mmScale) return;
+    const sc = document.scrollingElement;
+    const vh = sc.clientHeight;
+    const H = sc.scrollHeight;
+    const panelH = minimap.clientHeight;
+    const scaledH = H * mmScale;
+    const ih = vh * mmScale;                       // alto del recuadro
+    const scrollTop = sc.scrollTop;
+    if (scaledH <= panelH) {
+      mmTranslate = 0;                             // cabe entero: lienzo fijo arriba
+    } else {
+      const docScrollable = Math.max(1, H - vh);
+      const frac = Math.min(1, Math.max(0, scrollTop / docScrollable));
+      mmTranslate = frac * (panelH - ih) - scrollTop * mmScale;
+      mmTranslate = Math.max(Math.min(0, panelH - scaledH), Math.min(0, mmTranslate));
+    }
+    mmTy = Math.round(mmTranslate);  // snap a pixel entero -> reduce el difuminado del escalado
+    minimapCanvas.style.transform = 'translateY(' + mmTy + 'px) scale(' + mmScale + ')';
+    minimapMarks.style.transform = 'translateY(' + mmTy + 'px)';
+    minimapViewport.style.top = (scrollTop * mmScale + mmTy).toFixed(2) + 'px';
+    minimapViewport.style.height = Math.max(2, ih).toFixed(2) + 'px';
+  }
+  // Marcas de las coincidencias de búsqueda sobre el minimapa (regla tipo Sublime).
+  // Viven en coordenadas del lienzo SIN escalar (top = docY*scale) y comparten el mismo
+  // translateY (mmTy) que el lienzo, así se alinean con el contenido y se mueven con el
+  // scroll sin recolocar cada marca. Se deduplican por pixel para no crear miles de divs.
+  function renderMinimapMarks() {
+    if (!minimapMarks) return;
+    if (!minimapOn() || editMode || !searchQuery || !mmScale) { minimapMarks.innerHTML = ''; return; }
+    const cTop = content.getBoundingClientRect().top;
+    const seen = new Set();
+    const frag = document.createDocumentFragment();
+    content.querySelectorAll('mark.search-hit').forEach((m) => {
+      const r = m.getBoundingClientRect();
+      if (!r.height) return;
+      const y = Math.round((r.top - cTop) * mmScale);
+      if (seen.has(y)) return; seen.add(y);
+      const d = document.createElement('div');
+      d.className = 'mm-mark';
+      d.style.top = y + 'px';
+      frag.appendChild(d);
+    });
+    minimapMarks.innerHTML = '';
+    minimapMarks.appendChild(frag);
+    minimapMarks.style.transform = 'translateY(' + mmTy + 'px)';
+  }
+  // Ancho real de la scrollbar de la página (para que el gutter no quede debajo de ella).
+  function updateScrollbarW() {
+    document.documentElement.style.setProperty('--mm-sbw', (window.innerWidth - document.documentElement.clientWidth) + 'px');
+  }
+  // Franja "gutter": marca las coincidencias de búsqueda en el carril derecho cuando el
+  // minimapa está APAGADO (alternativa ligera). Mapea el documento entero al alto del
+  // viewport, así las marcas son FIJAS (como las anotaciones de scrollbar de Sublime).
+  function renderGutterMarks() {
+    if (!minimapGutter) return;
+    const show = !minimapOn() && !editMode && !!searchQuery;
+    minimapGutter.classList.toggle('show', show);
+    if (!show) { minimapGutter.innerHTML = ''; return; }
+    const sc = document.scrollingElement;
+    const H = Math.max(1, sc.scrollHeight);
+    const gh = minimapGutter.clientHeight || window.innerHeight;
+    const cTop = content.getBoundingClientRect().top;   // = -scrollTop (el contenido empieza en y=0)
+    const seen = new Set();
+    const frag = document.createDocumentFragment();
+    content.querySelectorAll('mark.search-hit').forEach((m) => {
+      const r = m.getBoundingClientRect();
+      if (!r.height) return;
+      const y = Math.round((r.top - cTop) / H * gh);    // posición absoluta del hit mapeada al gutter
+      if (seen.has(y)) return; seen.add(y);
+      const d = document.createElement('div');
+      d.className = 'gm';
+      d.style.top = y + 'px';
+      frag.appendChild(d);
+    });
+    minimapGutter.innerHTML = '';
+    minimapGutter.appendChild(frag);
+  }
+  // Mapea un punto del panel a una posición de scroll (centra el punto pulsado).
+  function minimapScrollTo(clientY) {
+    if (!mmScale) return;
+    const r = minimap.getBoundingClientRect();
+    const docY = (clientY - r.top - mmTranslate) / mmScale;
+    const sc = document.scrollingElement;
+    const target = docY - sc.clientHeight / 2;
+    sc.scrollTop = Math.max(0, Math.min(sc.scrollHeight - sc.clientHeight, target));
+  }
+  minimap.addEventListener('mousedown', (e) => {
+    if (!minimapOn() || editMode || mmDragging) return;
+    e.preventDefault();
+    // primer click antes de que el build diferido haya corrido: construye ya (evita ÷0)
+    if (!mmScale) { clearTimeout(mmBuildTimer); buildMinimap(); }
+    if (!mmScale) return;
+    mmDragging = true;
+    minimapScrollTo(e.clientY);
+    const move = (ev) => { if (mmDragging) minimapScrollTo(ev.clientY); };
+    const up = () => { mmDragging = false; document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  });
+
+  function setMinimap(on) {
+    document.body.classList.toggle('minimap-on', on);
+    btnMinimap.classList.toggle('active', on);
+    localStorage.setItem('mdlive-minimap', on ? '1' : '0');
+    if (on && !editMode) requestAnimationFrame(buildMinimap);
+    else if (!on) { minimapCanvas.innerHTML = ''; minimapMarks.innerHTML = ''; }
+    renderGutterMarks();   // el gutter solo aparece con el minimapa apagado
+  }
+  function toggleMinimap() { setMinimap(!minimapOn()); }
+  btnMinimap.onclick = toggleMinimap;
+
+  // --- redimensionado del minimapa (tirador en su borde izquierdo) ---
+  minimapResizer.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    if (!editMode) lastAnchor = findAnchor();
+    const startX = e.clientX;
+    const startW = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--minimap-w'), 10) || 170;
+    const move = (ev) => {
+      const w = Math.max(80, Math.min(520, startW - (ev.clientX - startX)));  // arrastrar a la izq = más ancho
+      document.documentElement.style.setProperty('--minimap-w', w + 'px');
+      scheduleMinimapBuild();
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      localStorage.setItem('mdlive-minimap-w', parseInt(getComputedStyle(document.documentElement).getPropertyValue('--minimap-w'), 10));
+      if (!editMode) restoreAnchor(lastAnchor);
+      scheduleMinimapBuild();
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  });
+
+  // --- gutter: salto al pulsar/arrastrar sobre la franja de coincidencias ---
+  function gutterScrollTo(clientY) {
+    const sc = document.scrollingElement;
+    const r = minimapGutter.getBoundingClientRect();
+    const gh = r.height || window.innerHeight;
+    const frac = Math.min(1, Math.max(0, (clientY - r.top) / gh));
+    sc.scrollTop = Math.max(0, Math.min(sc.scrollHeight - sc.clientHeight, frac * sc.scrollHeight - sc.clientHeight / 2));
+  }
+  minimapGutter.addEventListener('mousedown', (e) => {
+    if (editMode) return;
+    e.preventDefault();
+    gutterScrollTo(e.clientY);
+    const move = (ev) => gutterScrollTo(ev.clientY);
+    const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  });
+
   applyZoom();
   if (localStorage.getItem('mdlive-toc') === '1') { document.body.classList.add('toc-open'); btnToc.classList.add('active'); }
   if (localStorage.getItem('mdlive-pin') === '1') { document.body.classList.add('pin-on'); btnPin.classList.add('active'); }
+  if (localStorage.getItem('mdlive-minimap') !== '0') { document.body.classList.add('minimap-on'); btnMinimap.classList.add('active'); }
+  if (localStorage.getItem('mdlive-recent') === '1') { document.body.classList.add('recent-open'); btnRecent.classList.add('active'); }
+  const savedMmW = parseInt(localStorage.getItem('mdlive-minimap-w'), 10);
+  if (savedMmW) document.documentElement.style.setProperty('--minimap-w', savedMmW + 'px');
+  updateScrollbarW();
   updateSideOpen();
+  if (recentOpen()) loadRecent();
   searchResults.innerHTML = '<div class="search-info">Escribe para buscar…</div>';
   initMermaid();
 
