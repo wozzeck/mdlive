@@ -247,7 +247,16 @@ body.recent-open #recent-sec { display: flex; }
 .recent-item.missing { opacity: .5; cursor: default; }
 .recent-item .rn { display: flex; align-items: center; gap: .45em; font-size: 13px; color: var(--fg);
   white-space: nowrap; overflow: hidden; }
-.recent-item .rn .nm { overflow: hidden; text-overflow: ellipsis; }
+.recent-item .rn .nm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* boton copiar-ruta: discreto, aparece al pasar el raton por la fila */
+.recent-item .rn .rc { flex: 0 0 auto; margin-left: .35em; display: inline-flex; align-items: center;
+  justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px;
+  background: transparent; color: var(--muted); cursor: pointer; opacity: 0;
+  transition: opacity .12s, background .12s, color .12s; }
+.recent-item:hover .rn .rc { opacity: .6; }
+.recent-item .rn .rc:hover { opacity: 1; background: rgba(127,127,127,.18); color: var(--fg); }
+.recent-item .rn .rc.copied { opacity: 1; color: var(--link); }
+.recent-item .rn .rc svg { display: block; }
 /* punto = documento abierto ahora mismo (en otra ventana) */
 .recent-item .rn .dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--link); visibility: hidden; }
 .recent-item.open .rn .dot { visibility: visible; }
@@ -255,6 +264,9 @@ body.recent-open #recent-sec { display: flex; }
 /* ruta: … a la izquierda para conservar la parte final, más informativa */
 .recent-item .rd { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; direction: rtl; text-align: left; margin-left: calc(7px + .45em); }
+/* fecha de ultima apertura: "hace ..." + fecha absoluta */
+.recent-item .rt { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; margin-left: calc(7px + .45em); margin-top: .12em; opacity: .85; }
 /* resaltado de busqueda en el bloque en edicion (mark de CodeMirror) */
 .cm-search-hit { background: #fde047; border-radius: 2px; }
 /* halo breve y discreto que decrece ligeramente hasta el recuadro de la coincidencia

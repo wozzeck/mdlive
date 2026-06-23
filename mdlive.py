@@ -20,7 +20,7 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("WebKit2", "4.1")
-from gi.repository import Gtk, WebKit2, Gio, GLib  # noqa: E402
+from gi.repository import Gtk, WebKit2, Gio, GLib, Gdk  # noqa: E402
 
 APP_DIR = pathlib.Path(__file__).resolve().parent
 
@@ -149,6 +149,8 @@ class MdLive(Gtk.Window):
         self.ucm.connect("script-message-received::mdliveSave", self.on_save_message)
         self.ucm.register_script_message_handler("mdliveOpen")
         self.ucm.connect("script-message-received::mdliveOpen", self.on_open_message)
+        self.ucm.register_script_message_handler("mdliveCopy")
+        self.ucm.connect("script-message-received::mdliveCopy", self.on_copy_message)
 
         self.webview = WebKit2.WebView.new_with_user_content_manager(self.ucm)
         st = self.webview.get_settings()
@@ -185,6 +187,24 @@ class MdLive(Gtk.Window):
             self._mtimes["md"] = os.stat(self.md_path).st_mtime_ns
         except OSError as e:
             print("mdlive: no se pudo guardar %s: %s" % (self.md_path, e), file=sys.stderr)
+
+    # ---- copiar texto (ruta) al portapapeles del sistema (peticion del panel) ----
+    def on_copy_message(self, ucm, js_result):
+        try:
+            text = js_result.get_js_value().to_string()
+        except Exception:
+            try:
+                text = js_result.get_value().to_string()
+            except Exception:
+                return
+        if not text:
+            return
+        try:
+            cb = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+            cb.set_text(text, -1)
+            cb.store()  # conservar el contenido tras cerrar la ventana
+        except Exception as e:
+            print("mdlive: no se pudo copiar al portapapeles: %s" % e, file=sys.stderr)
 
     # ---- registro de instancias vivas (para enfocar la ventana ya abierta) ----
     def _register_instance(self):
@@ -267,7 +287,10 @@ class MdLive(Gtk.Window):
                 "dir": os.path.dirname(p).replace(str(pathlib.Path.home()), "~", 1),
                 "exists": os.path.exists(p),
                 "open": p in live,
+                "ts": it.get("ts"),
             })
+        # mas reciente primero; los items sin marca de tiempo quedan al final
+        items.sort(key=lambda x: x.get("ts") or 0, reverse=True)
         return {"current": str(self.md_path), "items": items}
 
     # ---- handler del esquema app:// -------------------------------------
