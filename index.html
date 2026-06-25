@@ -1155,6 +1155,32 @@
     if (a && linkAt(e.relatedTarget) !== a) linkbar.classList.remove('show');
   });
 
+  // ===== Enlaces a otros .md -> abrir/enfocar en mdlive =====================
+  // markdown-it deja el href tal cual; un enlace relativo a otro .md se resolveria
+  // como app://local/<rel> y WebKit lo serviria como texto crudo (octet-stream),
+  // perdiendo el visor. Igual que con las imagenes, resolvemos la ruta contra el
+  // dir del .md y la abrimos por el canal nativo (open-or-focus) en vez de navegar.
+  const MD_EXT = /\.(md|markdown|mkd|mdown|mdwn)$/i;
+  function localMdTarget(href) {
+    if (!href) return null;
+    if (/^(https?:|mailto:|tel:|data:)/i.test(href)) return null;   // externos
+    if (href.startsWith('#')) return null;                          // ancla interna
+    let p = href.split('#')[0].split('?')[0];                       // quita fragmento/query
+    if (/^app:/i.test(p)) p = p.replace(/^app:\/\/local\//i, '');   // por si ya viene resuelto
+    if (p.startsWith('file://')) p = p.slice('file://'.length);
+    let dec; try { dec = decodeURIComponent(p); } catch (_) { dec = p; }
+    if (!MD_EXT.test(dec)) return null;                             // solo .md
+    return dec.startsWith('/') ? dec : resolveAbs(mdDir, dec);      // relativo -> contra dir del .md
+  }
+  content.addEventListener('click', (e) => {
+    const a = linkAt(e.target);
+    if (!a) return;
+    const target = localMdTarget(a.getAttribute('href'));
+    if (!target) return;
+    e.preventDefault();
+    try { window.webkit.messageHandlers.mdliveOpen.postMessage(target); } catch (_) {}
+  });
+
   // ===== Minimapa del documento (estilo Sublime) ============================
   // Clon a escala de TODO el documento renderizado (instantánea) en un panel fijo a
   // la derecha, con un recuadro que marca la ventana visible y permite navegar.

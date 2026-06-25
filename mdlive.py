@@ -425,20 +425,45 @@ class MdLive(Gtk.Window):
         return True  # resto: sin menu contextual
 
     # ---- enlaces externos al navegador del sistema ----------------------
+    _MD_EXTS = (".md", ".markdown", ".mkd", ".mdown", ".mdwn")
+
+    def _md_target_from_app_uri(self, uri):
+        """Si la URI app:// de un enlace apunta a un .md, devuelve su ruta absoluta
+        en disco (relativa al dir del .md actual); si no, None. Red de seguridad para
+        clics que no pasan por el handler del visor (p.ej. previews del editor)."""
+        if not uri.startswith("app://local/"):
+            return None
+        path = uri.split("app://local/", 1)[-1].split("?", 1)[0].split("#", 1)[0]
+        path = urllib.parse.unquote(path)
+        if not path or not path.lower().endswith(self._MD_EXTS):
+            return None
+        if path.startswith("_abs/"):
+            return path[len("_abs/"):]
+        return str((self.md_path.parent / path).resolve())
+
     def on_decide_policy(self, webview, decision, decision_type):
         T = WebKit2.PolicyDecisionType
         if decision_type == T.NAVIGATION_ACTION:
             nav = decision.get_navigation_action()
             uri = nav.get_request().get_uri()
-            if nav.get_navigation_type() == WebKit2.NavigationType.LINK_CLICKED and not uri.startswith("app://"):
-                decision.ignore()
-                self._open_external(uri)
-                return True
+            if nav.get_navigation_type() == WebKit2.NavigationType.LINK_CLICKED:
+                if not uri.startswith("app://"):
+                    decision.ignore()
+                    self._open_external(uri)
+                    return True
+                md = self._md_target_from_app_uri(uri)
+                if md:  # enlace a otro .md -> abrir/enfocar en mdlive, no servir crudo
+                    decision.ignore()
+                    self._open_or_focus(md)
+                    return True
         elif decision_type == T.NEW_WINDOW_ACTION:
             nav = decision.get_navigation_action()
             uri = nav.get_request().get_uri()
             decision.ignore()
-            if not uri.startswith("app://"):
+            md = self._md_target_from_app_uri(uri)
+            if md:
+                self._open_or_focus(md)
+            elif not uri.startswith("app://"):
                 self._open_external(uri)
             return True
         return False
