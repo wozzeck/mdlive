@@ -628,8 +628,11 @@
     const minLvl = Math.min.apply(null, headings.map((h) => h.level));
     headings.forEach((h, i) => {
       const row = document.createElement('div');
-      row.className = 'toc-row';
-      row.style.setProperty('--lvl', h.level - minLvl);
+      const lvl = h.level - minLvl;
+      // --lvl = sangria (padding de la fila, asi el triangulo va con el nivel);
+      // .lvlN = tono del sombreado (ver style.css, editable en vivo)
+      row.className = 'toc-row lvl' + Math.min(lvl, 5);
+      row.style.setProperty('--lvl', lvl);
       const tw = document.createElement('span');
       tw.className = 'toc-tw';
       if (endOf(i) > i + 1) {
@@ -671,11 +674,15 @@
   }
   function setActive(i) {
     if (i === activeIdx) return;
-    if (activeIdx >= 0 && tocLinks[activeIdx]) tocLinks[activeIdx].a.classList.remove('active');
+    if (activeIdx >= 0 && tocLinks[activeIdx]) {
+      tocLinks[activeIdx].a.classList.remove('active');
+      tocLinks[activeIdx].row.classList.remove('active');
+    }
     activeIdx = i;
     if (i >= 0 && tocLinks[i]) {
       const a = tocLinks[i].a;
       a.classList.add('active');
+      tocLinks[i].row.classList.add('active');   // el realce va en la fila (incluye el triangulo)
       const pr = tocList.getBoundingClientRect(), ar = a.getBoundingClientRect();
       if (ar.top < pr.top + 4 || ar.bottom > pr.bottom - 4) a.scrollIntoView({ block: 'nearest' });
     }

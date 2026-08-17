@@ -287,26 +287,48 @@ body.recent-open #recent-sec { display: flex; }
   100% { transform: scale(1);   opacity: 0; }
 }
 /* === Índice ============================================================== */
-#toc-list { padding: .35rem 0 1rem; }
-#toc-list .toc-row { display: flex; align-items: flex-start; line-height: 1.35; }
+/* --toc-indent: un escalon de sangria. Vale TAMBIEN como ancho del triangulo,
+   asi el triangulo de un hijo cae justo bajo el texto de su padre (como en un
+   arbol de ficheros). Cambia el valor y se resangra todo el arbol. */
+#toc-list { padding: .35rem 0 1rem; --toc-indent: .9rem; }
+/* la sangria va en la FILA (antes estaba en el enlace): de ese modo el triangulo
+   de expandir/contraer se desplaza con el nivel en vez de quedar siempre pegado
+   al borde del panel */
+#toc-list .toc-row {
+  display: flex; align-items: flex-start; line-height: 1.35;
+  padding-left: calc(var(--lvl, 0) * var(--toc-indent));
+  border-left: 2px solid transparent;
+  /* content-box: el sombreado NO pinta la sangria -> se ve la escalera de niveles */
+  background-clip: content-box;
+}
+/* sombreado por nivel: mas oscuro arriba, aclarando al bajar. Tono neutro a
+   proposito (el azul queda reservado para la fila activa). Va en
+   background-COLOR para que hover y activo se superpongan con background-image */
+#toc-list .toc-row.lvl0 { background-color: rgba(31,35,40,.165); }
+#toc-list .toc-row.lvl1 { background-color: rgba(31,35,40,.115); }
+#toc-list .toc-row.lvl2 { background-color: rgba(31,35,40,.076); }
+#toc-list .toc-row.lvl3 { background-color: rgba(31,35,40,.046); }
+#toc-list .toc-row.lvl4 { background-color: rgba(31,35,40,.024); }
+#toc-list .toc-row.lvl5 { background-color: rgba(31,35,40,.008); }
+#toc-list .toc-row:hover { background-image: linear-gradient(rgba(127,127,127,.14), rgba(127,127,127,.14)); }
+#toc-list .toc-row.active {
+  border-left-color: var(--link);
+  background-image: linear-gradient(rgba(9,105,218,.13), rgba(9,105,218,.13));
+}
+#toc-list .toc-row.active:hover { background-image: linear-gradient(rgba(9,105,218,.19), rgba(9,105,218,.19)); }
 #toc-list .toc-tw {
-  flex: 0 0 1.1em; width: 1.1em; text-align: center; cursor: default;
+  flex: 0 0 var(--toc-indent); width: var(--toc-indent); text-align: center; cursor: default;
   color: var(--muted); font-size: 10px; padding-top: .42em; user-select: none;
 }
 #toc-list .toc-tw.has { cursor: pointer; }
 #toc-list .toc-tw.has:hover { color: var(--fg); }
 #toc-list a {
   flex: 1 1 auto; display: block; min-width: 0;
-  padding: .2em .85rem .2em calc(var(--lvl, 0) * .8rem);
+  padding: .2em .85rem .2em .15rem;
   color: var(--fg); text-decoration: none; font-size: 13px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  border-left: 2px solid transparent;
 }
-#toc-list a:hover { background: rgba(127,127,127,.12); }
-#toc-list a.active {
-  color: var(--link); font-weight: 600;
-  border-left-color: var(--link); background: rgba(9,105,218,.09);
-}
+#toc-list .toc-row.active a { color: var(--link); font-weight: 600; }
 #toc-list .toc-empty { color: var(--muted); font-style: italic; padding: .6rem .85rem; font-size: 13px; }
 /* tirador de redimensionado en el borde derecho del panel */
 #toc-resizer {
