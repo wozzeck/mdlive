@@ -446,31 +446,66 @@
     view.dispatch({ changes: { from, to, insert }, selection: { anchor: urlAt, head: urlAt + 3 } });
     view.focus(); return true;
   }
-  // Salir del bloque en edicion con las flechas arriba/abajo. Con el live-preview TODO lo
-  // que no es el bloque del cursor son widgets de bloque: CM resuelve el movimiento
-  // vertical por coordenadas y, al no encontrar ninguna linea de texto donde aterrizar,
-  // se lleva el cursor al principio/final del documento. Aqui: si el movimiento que haria
-  // CM se sale del bloque, saltamos al bloque vecino conservando la columna (y ese pasa a
-  // mostrarse como fuente); si se queda dentro, dejamos actuar a CM (lineas con wrap).
-  function cmMoveBlock(view, forward) {
+  // ---- movimiento VERTICAL del cursor en el editor -------------------------
+  // Con el live-preview, todo lo que no toca la selección son widgets de bloque. CM
+  // resuelve el movimiento vertical por coordenadas y, al no encontrar ninguna línea de
+  // texto donde aterrizar, se lleva el cursor al principio/final del documento. Por eso
+  // atendemos nosotros flechas y páginas: si el destino que calcula CM se sale de la
+  // región en fuente, saltamos al bloque vecino (que pasa a mostrarse como fuente); si se
+  // queda dentro, dejamos actuar a CM (líneas con wrap, bloques largos).
+  // region en FUENTE = union de los bloques que toca la seleccion (build() los pinta asi)
+  function cmSourceRange(st, blocks) {
+    const sel = st.selection.main;
+    let from = -1, to = -1;
+    for (const blk of blocks) {
+      if (sel.from <= blk.to && sel.to >= blk.from) { if (from < 0) from = blk.from; to = blk.to; }
+    }
+    return { from, to };
+  }
+  function cmGoTo(view, pos, extend) {
+    const sel = view.state.selection.main;
+    view.dispatch({ selection: extend ? { anchor: sel.anchor, head: pos } : { anchor: pos }, scrollIntoView: true });
+    return true;
+  }
+  function cmMoveBlock(view, forward, extend) {
     const st = view.state, sel = st.selection.main;
-    if (!sel.empty) return false;
     const blocks = blocksOf(st);
+    const src = cmSourceRange(st, blocks);
+    if (src.from < 0) return false;
+    const byLine = view.moveVertically(sel, forward).head;
+    if (byLine >= src.from && byLine <= src.to) return false;   // sigue en fuente: deja a CM
     const i = blocks.findIndex((blk) => sel.head >= blk.from && sel.head <= blk.to);
-    if (i < 0) return false;
-    const cmTarget = view.moveVertically(sel, forward).head;
-    if (cmTarget >= blocks[i].from && cmTarget <= blocks[i].to) return false;  // sigue dentro
-    const target = blocks[i + (forward ? 1 : -1)];
+    const target = i < 0 ? null : blocks[i + (forward ? 1 : -1)];
     if (!target) return false;
     const col = sel.head - st.doc.lineAt(sel.head).from;
     const tl = st.doc.lineAt(forward ? target.from : target.to);
-    view.dispatch({ selection: { anchor: Math.min(tl.from + col, tl.to) }, scrollIntoView: true });
-    return true;
+    return cmGoTo(view, Math.min(tl.from + col, tl.to), extend);
+  }
+  // PageUp/PageDown: si el salto de pantalla se sale de la fuente, el destino se busca por
+  // ALTURA en el mapa de bloques de CM (lineBlockAtHeight, que sí conoce los widgets) y el
+  // cursor va al principio del bloque que caiga a una pantalla de distancia
+  function cmMovePage(view, forward, extend) {
+    const st = view.state, sel = st.selection.main;
+    const blocks = blocksOf(st);
+    const src = cmSourceRange(st, blocks);
+    if (src.from < 0) return false;
+    const page = Math.min(window.innerHeight, view.dom.clientHeight);
+    const byPage = view.moveVertically(sel, forward, page).head;
+    if (byPage >= src.from && byPage <= src.to) return cmGoTo(view, byPage, extend);
+    const c = view.coordsAtPos(sel.head);
+    const y = (c ? (forward ? c.bottom : c.top) : 0) + (forward ? page : -page) - view.documentTop;
+    return cmGoTo(view, view.lineBlockAtHeight(Math.max(0, y)).from, extend);
   }
   function formatKeymap(CM) {
     return CM.view.keymap.of([
-      { key: 'ArrowDown', run: (v) => cmMoveBlock(v, true) },
-      { key: 'ArrowUp', run: (v) => cmMoveBlock(v, false) },
+      { key: 'ArrowDown', run: (v) => cmMoveBlock(v, true, false) },
+      { key: 'ArrowUp', run: (v) => cmMoveBlock(v, false, false) },
+      { key: 'Shift-ArrowDown', run: (v) => cmMoveBlock(v, true, true) },
+      { key: 'Shift-ArrowUp', run: (v) => cmMoveBlock(v, false, true) },
+      { key: 'PageDown', run: (v) => cmMovePage(v, true, false) },
+      { key: 'PageUp', run: (v) => cmMovePage(v, false, false) },
+      { key: 'Shift-PageDown', run: (v) => cmMovePage(v, true, true) },
+      { key: 'Shift-PageUp', run: (v) => cmMovePage(v, false, true) },
       { key: 'Mod-b', run: (v) => cmWrap(v, '**'), preventDefault: true },
       { key: 'Mod-k', run: (v) => cmWrap(v, '*'), preventDefault: true },
       { key: 'Mod-u', run: (v) => cmWrap(v, '<u>', '</u>'), preventDefault: true },
@@ -488,7 +523,7 @@
   }
 
   function buildExtensions(CM) {
-    const { EditorView, keymap, drawSelection, Decoration } = CM.view;
+    const { EditorView, keymap, Decoration } = CM.view;
     const { StateField, StateEffect, RangeSetBuilder, Prec } = CM.state;
     const { history, historyKeymap, defaultKeymap, indentWithTab } = CM.commands;
     const { syntaxHighlighting, defaultHighlightStyle } = CM.language;
@@ -519,7 +554,9 @@
     });
     return [
       history(),
-      drawSelection(),
+      // SIN drawSelection(): pinta la selección en una capa DETRÁS del contenido, y el
+      // sombreado del bloque en edición (.cm-editing) la tapaba -> no se veía nada
+      // seleccionado. Con la selección nativa del navegador el resaltado va por encima.
       EditorView.lineWrapping,
       Prec.highest(formatKeymap(CM)),  // atajos de formato: prioridad sobre el keymap por defecto
       keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
@@ -531,7 +568,6 @@
       EditorView.theme({
         '&': { color: 'var(--fg)', backgroundColor: 'transparent' },
         '.cm-content': { fontFamily: 'var(--font-body)', caretColor: 'var(--fg)' },
-        '.cm-cursor': { borderLeftColor: 'var(--fg)' },
         '&.cm-focused': { outline: 'none' },
         '.cm-activeLine': { backgroundColor: 'transparent' },
       }),
@@ -716,18 +752,45 @@
     if (tw) tw.textContent = collapsed.has(i) ? '▸' : '▾';
     applyCollapsed();
   }
+  // alto de la barra de títulos fijados (0 si no está visible)
+  function pinBarH() { return (pinOn() && pinBar.classList.contains('show')) ? pinBar.offsetHeight : 0; }
+  // y (en el viewport) del encabezado i: por el DOM en el visor, por coordsAtPos al editar
+  function headingTop(i) {
+    const h = headings[i]; if (!h) return null;
+    if (editMode && cmView) {
+      const doc = cmView.state.doc;
+      const c = cmView.coordsAtPos(doc.line(Math.min(doc.lines, h.line + 1)).from);
+      return c ? c.top : null;
+    }
+    const el = content.querySelectorAll('h1,h2,h3,h4,h5,h6')[i];
+    return el ? el.getBoundingClientRect().top : null;
+  }
   function gotoHeading(i) {
     const h = headings[i]; if (!h) return;
+    // el destino tiene que quedar por DEBAJO de la barra de títulos fijados (es fixed y
+    // taparía el encabezado al que saltamos)
+    const margin = () => pinBarH() + 10;
     if (editMode && cmView) {
       const doc = cmView.state.doc;
       const pos = doc.line(Math.min(doc.lines, h.line + 1)).from;
-      cmView.dispatch({ selection: { anchor: pos }, effects: window.CM.view.EditorView.scrollIntoView(pos, { y: 'start', yMargin: 14 }) });
+      cmView.dispatch({ selection: { anchor: pos }, effects: window.CM.view.EditorView.scrollIntoView(pos, { y: 'start', yMargin: margin() + 4 }) });
       cmView.focus();
     } else {
-      const els = content.querySelectorAll('h1,h2,h3,h4,h5,h6');
-      const el = els[i];
-      if (el) { const sc = document.scrollingElement; sc.scrollTop = sc.scrollTop + el.getBoundingClientRect().top - 10; }
+      const el = content.querySelectorAll('h1,h2,h3,h4,h5,h6')[i];
+      if (el) { const sc = document.scrollingElement; sc.scrollTop = sc.scrollTop + el.getBoundingClientRect().top - margin(); }
     }
+    // al llegar, la barra pasa a mostrar otra cadena de ancestros y cambia de alto:
+    // corregimos en los frames siguientes hasta que el encabezado quede visible
+    let tries = 0;
+    const settle = () => {
+      updateSpy();
+      const top = headingTop(i), need = margin();
+      if (top != null && top < need - 1 && tries++ < 4) {
+        document.scrollingElement.scrollTop -= (need - top);
+        requestAnimationFrame(settle);
+      }
+    };
+    requestAnimationFrame(settle);
     setActive(i);
   }
   function setActive(i) {
@@ -789,8 +852,7 @@
   function pinOn() { return document.body.classList.contains('pin-on'); }
   // altura de la barra fija -> usada por el sticky de los thead de tabla (top var)
   function setPinH() {
-    const h = (pinOn() && pinBar.classList.contains('show')) ? pinBar.offsetHeight : 0;
-    document.documentElement.style.setProperty('--pin-h', h + 'px');
+    document.documentElement.style.setProperty('--pin-h', pinBarH() + 'px');
   }
   function updatePinBar(idx) {
     if (!pinOn() || idx < 0 || !headings[idx]) { pinBar.classList.remove('show'); pinIdx = -1; setPinH(); return; }
