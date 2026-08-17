@@ -53,10 +53,9 @@ body {
 .markdown-body h4 { font-size: 1em; }
 .markdown-body h5 { font-size: .9em; }
 .markdown-body h6 { font-size: .85em; color: var(--muted); }
-/* solo el PRIMER elemento del documento (visor) o del PRIMER bloque del editor pierde
-   el margen superior; cada widget de bloque conserva su margen natural para que el
-   espaciado entre bloques (sobre todo encima de los títulos) sea idéntico al visor */
-#content > :first-child, .cm-mdblock.cm-first > :first-child { margin-top: 0; }
+/* el primer elemento del documento no lleva margen superior (en el editor lo hace el
+   bloque .cm-mdblock, ver más abajo) */
+#content > :first-child { margin-top: 0; }
 
 /* ---- texto ---- */
 .markdown-body p, .markdown-body ul, .markdown-body ol,
@@ -122,13 +121,22 @@ body {
 .cm-editor .cm-line { padding: 0; }
 /* hueco invisible que iguala el espaciado del visor entre bloques al editar */
 .cm-blockgap { user-select: none; }
-/* El bloque renderizado reutiliza .markdown-body SIN caja propia (sin margin,
-   padding ni border) para que los margenes de su contenido colapsen igual que
-   en el visor: el espaciado entre bloques es identico, no se suma altura. */
+/* El bloque renderizado reutiliza .markdown-body, pero es su PROPIA caja
+   (display: flow-root) y con los margenes de sus extremos a 0: el hueco hasta el
+   bloque siguiente lo pone build() como padding-bottom, con el mismo valor que da el
+   colapso de margenes del visor. IMPRESCINDIBLE para el cursor: CM mide el widget con
+   getBoundingClientRect (sin margenes), asi que un margen que se escape de la caja
+   descuadra su mapa de alturas y las flechas arriba/abajo (o la seleccion con raton)
+   mandan el cursor a otro punto del documento. */
 /* white-space:normal es CLAVE: CM pone pre-wrap en .cm-content y se hereda al
    widget -> los \n que md.render deja entre <li>/<tr> y dentro de <p> multilinea
    se renderizarian como saltos literales, inflando el espaciado. */
-.cm-mdblock.markdown-body { max-width: none; margin: 0; padding: 0; cursor: text; white-space: normal; }
+.cm-mdblock.markdown-body {
+  max-width: none; margin: 0; padding: 0; cursor: text; white-space: normal;
+  display: flow-root;
+}
+.cm-mdblock > :first-child { margin-top: 0; }
+.cm-mdblock > :last-child { margin-bottom: 0; }
 .mdblock-empty { color: var(--muted); font-style: italic; }
 /* bloque en edicion: se ve como fuente y se sombrea para distinguirlo */
 .cm-editor .cm-editing { background: var(--editing-bg); }

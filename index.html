@@ -247,12 +247,35 @@
   function makeLivePreview(CM) {
     const { Decoration, WidgetType, EditorView } = CM.view;
     const { RangeSetBuilder, StateField } = CM.state;
+    // CM mide cada widget de bloque con getBoundingClientRect, que NO incluye los
+    // margenes. Si un margen se escapa de la caja del widget (o su contenido cambia de
+    // alto despues de medirlo), el mapa de alturas de CM se queda corto respecto al DOM
+    // y sus coordenadas dejan de cuadrar: posAtCoords devuelve otra posicion y el cursor
+    // SALTA a otro punto del documento (flechas arriba/abajo, seleccion con raton).
+    // Por eso el widget: (1) es su propia caja (display:flow-root en el CSS, con los
+    // margenes de sus extremos a 0) y lleva el hueco hasta el bloque siguiente como
+    // padding-bottom; (2) se vigila con un ResizeObserver para re-medir si crece luego
+    // (imagenes que cargan, diagramas mermaid).
+    let sizeObs = null, sizeObsView = null;
+    function observeSize(view, dom) {
+      sizeObsView = view;
+      if (!sizeObs) sizeObs = new ResizeObserver((entries) => {
+        let changed = false;
+        for (const e of entries) {
+          const h = Math.round(e.target.getBoundingClientRect().height);
+          if (e.target._mdH !== h) { e.target._mdH = h; changed = true; }
+        }
+        if (changed && sizeObsView) sizeObsView.requestMeasure();
+      });
+      sizeObs.observe(dom);
+    }
     class MdWidget extends WidgetType {
-      constructor(text, from, q, first) { super(); this.text = text; this.from = from; this.q = q; this.first = first; }
-      eq(o) { return o.text === this.text && o.from === this.from && o.q === this.q && o.first === this.first; }
+      constructor(text, from, q, gap) { super(); this.text = text; this.from = from; this.q = q; this.gap = gap; }
+      eq(o) { return o.text === this.text && o.from === this.from && o.q === this.q && o.gap === this.gap; }
       toDOM(view) {
         const div = document.createElement('div');
-        div.className = 'cm-mdblock markdown-body' + (this.first ? ' cm-first' : '');
+        div.className = 'cm-mdblock markdown-body';
+        div.style.paddingBottom = this.gap.toFixed(3) + 'rem';   // hueco hasta el bloque siguiente
         div.innerHTML = md.render(this.text) || '<p class="mdblock-empty">vacío</p>';
         decorateSync(div);
         if (this.q) highlightInElement(div, this.q);  // resalta ocurrencias en el bloque renderizado
@@ -261,8 +284,10 @@
           view.dispatch({ selection: { anchor: this.from } });
           view.focus();
         });
+        observeSize(view, div);
         return div;
       }
+      destroy(dom) { if (sizeObs) sizeObs.unobserve(dom); }
       ignoreEvent() { return false; }
     }
     // cache de decoraciones de linea por clase (cm-editing [+ cm-li-gap | cm-edit-hN])
@@ -270,18 +295,36 @@
     const lineDeco = (cls) => _lineDeco[cls] || (_lineDeco[cls] = Decoration.line({ class: cls }));
     const ITEM_RE = /^\s*([-*+]|\d+[.)])\s/;
     const HEAD_RE = /^(#{1,6})\s/;
+    const HR_RE = /^\s*(-{3,}|\*{3,}|_{3,})\s*$/;
+    const FENCE_RE = /^\s*(```+|~~~+)/;
+    const MERMAID_RE = /^\s*(```+|~~~+)\s*mermaid\b/;
     // multiplicadores de tamano de fuente por nivel de encabezado (= .markdown-body hN)
     const FONT_MUL = [2, 1.5, 1.25, 1, .9, .85];
-    // margenes verticales (en rem) que .markdown-body daria a este bloque, para reproducir
-    // EXACTAMENTE el espaciado del visor cuando el bloque se edita como fuente
-    function blockMargins(txt) {
+    const PRE_MUL = .86;   // .markdown-body pre { font-size: .86em } -> su margen em escala
+    // margenes verticales (en rem) que .markdown-body daria a la linea indicada. Ojo: los
+    // margenes van en em, asi que escalan con el font-size del propio elemento
+    function lineMargins(txt) {
       const h = txt.match(HEAD_RE);
       if (h) {
         const L = h[1].length, m = FONT_MUL[L - 1];
         // h1/h2 ademas tienen padding-bottom .3em + borde 1px (no colapsan): contribuyen al hueco inferior
         return { top: 1.8 * m, bottom: .7 * m, padB: (L <= 2) ? (.3 * m + 1 / 17) : 0 };
       }
-      return { top: 0, bottom: 1.05, padB: 0 };  // p / listas / cita / tabla / pre: margin 0 0 1.05em
+      if (HR_RE.test(txt)) return { top: 2, bottom: 2, padB: 0 };            // hr: margin 2em 0
+      if (MERMAID_RE.test(txt)) return { top: 1.3, bottom: 1.3, padB: 0 };   // .mermaid: margin 1.3em 0
+      if (FENCE_RE.test(txt)) return { top: 0, bottom: 1.05 * PRE_MUL, padB: 0 };
+      return { top: 0, bottom: 1.05, padB: 0 };  // p / listas / cita / tabla: margin 0 0 1.05em
+    }
+    // espaciado del bloque: el margen SUPERIOR lo fija su primera linea y el INFERIOR su
+    // ultima, porque un bloque puede renderizar varios elementos (p.ej. "## T" y un
+    // parrafo sin linea en blanco entre medias). Excepcion: si empieza con fence es UN
+    // solo elemento (pre o diagrama) y lo define su primera linea (la de cierre no dice
+    // si era mermaid)
+    function blockSpacing(doc, blk) {
+      const first = doc.lineAt(blk.from).text;
+      const a = lineMargins(first);
+      const z = FENCE_RE.test(first) ? a : lineMargins(doc.lineAt(blk.to).text);
+      return { top: a.top, bottom: z.bottom, padB: z.padB };
     }
     // hueco invisible que sustituye a las lineas en blanco entre el bloque editado y el
     // siguiente, con la altura justa para que el espaciado sea identico al del visor
@@ -296,33 +339,26 @@
       const sel = state.selection.main;
       const doc = state.doc;
       const blocks = blocksOf(state);
+      // El hueco entre dos bloques lo pone SIEMPRE el de arriba, con el valor que daria
+      // el visor: alli los margenes colapsan, asi que el hueco es max(), no la suma.
+      const sp = blocks.map((blk) => blockSpacing(doc, blk));
+      const gapAfter = (i) => (i + 1 < blocks.length) ? Math.max(sp[i].bottom, sp[i + 1].top) : sp[i].bottom;
       for (let i = 0; i < blocks.length; i++) {
         const blk = blocks[i];
         if (sel.from <= blk.to && sel.to >= blk.from) {
-          // bloque del cursor: se muestra como FUENTE y se sombrea linea a linea.
-          // Para que el toggle vista<->edicion NO desplace el texto, reproducimos el
-          // espaciado del visor: margen SUPERIOR extra (si el del bloque supera al del
-          // anterior) e INFERIOR colapsando las lineas en blanco a la altura justa.
+          // bloque del cursor: se muestra como FUENTE y se sombrea linea a linea. El hueco
+          // de ARRIBA ya lo pone el widget anterior (su padding-bottom); el de ABAJO lo pone
+          // un GapWidget que sustituye a las lineas en blanco, con la altura exacta del visor
+          // (+ padB: el padding-bottom y el borde que un h1/h2 renderizado si tiene).
           const nextB = blocks[i + 1];
-          const C = blockMargins(doc.lineAt(blk.from).text);
-          const nTop = nextB ? blockMargins(doc.lineAt(nextB.from).text).top : 0;
-          // margen SUPERIOR: como el margin-top de la linea fuente COLAPSA con el margen
-          // inferior del widget anterior, ponemos el margen completo del bloque -> el
-          // colapso da max(prev.bottom, C.top), justo el hueco del visor (0 en el 1er bloque)
-          const aboveMargin = (i > 0) ? C.top : 0;   // rem
-          // margen INFERIOR: un GapWidget de altura fija (no colapsa) + el margin-top del
-          // widget siguiente => padB + max(C.bottom, N.top), identico al visor
-          const belowGap = nextB ? (C.padB + Math.max(0, C.bottom - nTop)) : 0;  // rem
-          let ln = doc.lineAt(blk.from), prevItem = false, firstLine = true;
+          const belowGap = nextB ? (sp[i].padB + gapAfter(i)) : 0;  // rem
+          let ln = doc.lineAt(blk.from), prevItem = false;
           for (;;) {
             const item = ITEM_RE.test(ln.text);
             const hm = ln.text.match(HEAD_RE);
             const cls = hm ? ('cm-editing cm-edit-h' + hm[1].length) : ((item && prevItem) ? 'cm-editing cm-li-gap' : 'cm-editing');
-            const deco = (firstLine && aboveMargin > 0)
-              ? Decoration.line({ class: cls, attributes: { style: 'margin-top:' + aboveMargin.toFixed(3) + 'rem' } })
-              : lineDeco(cls);
-            b.add(ln.from, ln.from, deco);
-            prevItem = item; firstLine = false;
+            b.add(ln.from, ln.from, lineDeco(cls));
+            prevItem = item;
             if (ln.to >= blk.to) break;
             ln = doc.line(ln.number + 1);
           }
@@ -335,10 +371,9 @@
         }
         // El widget ABSORBE las lineas en blanco que siguen, hasta el inicio del
         // bloque siguiente: asi NO quedan .cm-line vacias visibles entre bloques.
-        // El espaciado lo dan los margenes de .markdown-body -> identico al visor.
         const next = blocks[i + 1];
         const to = next ? doc.lineAt(next.from - 1).to : doc.length;
-        b.add(blk.from, to, Decoration.replace({ widget: new MdWidget(blk.text, blk.from, searchQuery, i === 0), block: true }));
+        b.add(blk.from, to, Decoration.replace({ widget: new MdWidget(blk.text, blk.from, searchQuery, gapAfter(i)), block: true }));
       }
       return b.finish();
     }
@@ -411,8 +446,31 @@
     view.dispatch({ changes: { from, to, insert }, selection: { anchor: urlAt, head: urlAt + 3 } });
     view.focus(); return true;
   }
+  // Salir del bloque en edicion con las flechas arriba/abajo. Con el live-preview TODO lo
+  // que no es el bloque del cursor son widgets de bloque: CM resuelve el movimiento
+  // vertical por coordenadas y, al no encontrar ninguna linea de texto donde aterrizar,
+  // se lleva el cursor al principio/final del documento. Aqui: si el movimiento que haria
+  // CM se sale del bloque, saltamos al bloque vecino conservando la columna (y ese pasa a
+  // mostrarse como fuente); si se queda dentro, dejamos actuar a CM (lineas con wrap).
+  function cmMoveBlock(view, forward) {
+    const st = view.state, sel = st.selection.main;
+    if (!sel.empty) return false;
+    const blocks = blocksOf(st);
+    const i = blocks.findIndex((blk) => sel.head >= blk.from && sel.head <= blk.to);
+    if (i < 0) return false;
+    const cmTarget = view.moveVertically(sel, forward).head;
+    if (cmTarget >= blocks[i].from && cmTarget <= blocks[i].to) return false;  // sigue dentro
+    const target = blocks[i + (forward ? 1 : -1)];
+    if (!target) return false;
+    const col = sel.head - st.doc.lineAt(sel.head).from;
+    const tl = st.doc.lineAt(forward ? target.from : target.to);
+    view.dispatch({ selection: { anchor: Math.min(tl.from + col, tl.to) }, scrollIntoView: true });
+    return true;
+  }
   function formatKeymap(CM) {
     return CM.view.keymap.of([
+      { key: 'ArrowDown', run: (v) => cmMoveBlock(v, true) },
+      { key: 'ArrowUp', run: (v) => cmMoveBlock(v, false) },
       { key: 'Mod-b', run: (v) => cmWrap(v, '**'), preventDefault: true },
       { key: 'Mod-k', run: (v) => cmWrap(v, '*'), preventDefault: true },
       { key: 'Mod-u', run: (v) => cmWrap(v, '<u>', '</u>'), preventDefault: true },
