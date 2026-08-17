@@ -765,6 +765,27 @@
     const el = content.querySelectorAll('h1,h2,h3,h4,h5,h6')[i];
     return el ? el.getBoundingClientRect().top : null;
   }
+  // recuadro (viewport) del TEXTO del encabezado i, para el halo: el elemento (o la línea
+  // del editor) ocupa todo el ancho, así que medimos su contenido con un Range
+  function headingRect(i) {
+    let el = null;
+    if (editMode && cmView) {
+      const h = headings[i]; if (!h) return null;
+      const doc = cmView.state.doc;
+      try {
+        const node = cmView.domAtPos(doc.line(Math.min(doc.lines, h.line + 1)).from).node;
+        const base = node.nodeType === 1 ? node : node.parentElement;
+        el = base && base.closest('.cm-line');
+      } catch (_) { return null; }
+    } else {
+      el = content.querySelectorAll('h1,h2,h3,h4,h5,h6')[i];
+    }
+    if (!el) return null;
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    const rect = r.getBoundingClientRect();
+    return rect.width ? rect : el.getBoundingClientRect();
+  }
   function gotoHeading(i) {
     const h = headings[i]; if (!h) return;
     // el destino tiene que quedar por DEBAJO de la barra de títulos fijados (es fixed y
@@ -788,7 +809,9 @@
       if (top != null && top < need - 1 && tries++ < 4) {
         document.scrollingElement.scrollTop -= (need - top);
         requestAnimationFrame(settle);
+        return;
       }
+      showHalo(headingRect(i), 1.35);   // halo momentáneo: localizar el título con la vista
     };
     requestAnimationFrame(settle);
     setActive(i);
@@ -1037,11 +1060,14 @@
     }
   }
 
-  // halo rectangular que decrece ligeramente hasta el recuadro de la coincidencia
-  function showHalo(rect) {
+  // halo rectangular que decrece ligeramente hasta el recuadro de la coincidencia.
+  // scale = cuánto arranca de grande (por defecto el de las búsquedas, sobre una palabra;
+  // para recuadros anchos, como un título entero, conviene bastante menos)
+  function showHalo(rect, scale) {
     if (!rect) return;
     const el = document.createElement('div');
     el.className = 'mdlive-halo';
+    if (scale) el.style.setProperty('--halo-s', scale);
     el.style.left = (rect.left - 6) + 'px'; el.style.top = (rect.top - 4) + 'px';
     el.style.width = (Math.max(2, rect.width) + 12) + 'px'; el.style.height = (Math.max(2, rect.height) + 8) + 'px';
     document.body.appendChild(el);

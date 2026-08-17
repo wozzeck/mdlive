@@ -282,8 +282,10 @@ body.recent-open #recent-sec { display: flex; }
   text-overflow: ellipsis; margin-left: calc(7px + .45em); margin-top: .12em; opacity: .85; }
 /* resaltado de busqueda en el bloque en edicion (mark de CodeMirror) */
 .cm-search-hit { background: #fde047; border-radius: 2px; }
-/* halo breve y discreto que decrece ligeramente hasta el recuadro de la coincidencia
-   (mismo amarillo del resaltado); solo para localizarla con la vista al navegar */
+/* halo breve y discreto que decrece ligeramente hasta el recuadro de destino (mismo
+   amarillo del resaltado); solo para localizarlo con la vista al navegar. --halo-s = de
+   cuanto arranca: 3.2 para una coincidencia de busqueda (una palabra), menos para
+   recuadros anchos como un titulo entero (lo fija showHalo) */
 .mdlive-halo {
   position: fixed; pointer-events: none; z-index: 60;
   border-radius: 4px; background: #fde047;
@@ -291,8 +293,8 @@ body.recent-open #recent-sec { display: flex; }
   animation: mdlive-halo .5s ease-out forwards;
 }
 @keyframes mdlive-halo {
-  0%   { transform: scale(3.2); opacity: .65; }
-  100% { transform: scale(1);   opacity: 0; }
+  0%   { transform: scale(var(--halo-s, 3.2)); opacity: .65; }
+  100% { transform: scale(1);                  opacity: 0; }
 }
 /* === Índice ============================================================== */
 /* --toc-indent: un escalon de sangria. Vale TAMBIEN como ancho del triangulo,
