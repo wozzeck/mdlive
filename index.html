@@ -64,7 +64,8 @@
           <tr><td><kbd>m</kbd></td><td>Minimapa del documento</td></tr>
           <tr><td><kbd>r</kbd></td><td>Documentos recientes</td></tr>
           <tr><td><kbd>e</kbd></td><td>Modo edición</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Buscar</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Buscar (selecciona lo escrito; repetir avanza a la siguiente coincidencia)</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></td><td>Igual, pero hacia la coincidencia anterior</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd> / <kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Coincidencia siguiente / anterior</td></tr>
           <tr><td><kbd>Ctrl</kbd>+rueda</td><td>Zoom de solo texto</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>0</kbd></td><td>Restablecer el zoom</td></tr>
@@ -655,9 +656,9 @@
   addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'h' || e.key === 'H')) { e.preventDefault(); toggleHelp(); return; }
     if (e.key === 'Escape' && helpOpen()) { e.preventDefault(); setHelp(false); return; }
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); setSearch(true); return; }
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'n' || e.key === 'N')) { e.preventDefault(); if (searchHits.length) gotoHit((searchCur + 1) % searchHits.length, false); return; }
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); if (searchHits.length) gotoHit((searchCur - 1 + searchHits.length) % searchHits.length, false); return; }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); focusSearch(e.shiftKey); return; }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'n' || e.key === 'N')) { e.preventDefault(); searchStep(false); return; }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); searchStep(true); return; }
     if ((e.ctrlKey || e.metaKey) && e.key === '0') { e.preventDefault(); zoom = 1; applyZoom(); return; }
     // dentro del editor CM, no robar teclas (salvo Escape para salir de edicion)
     if (editMode) { if (e.key === 'Escape') { e.preventDefault(); setEditMode(false); } return; }
@@ -955,6 +956,7 @@
   let searchTimer = null;
   let searchHits = [];   // [{line, col, row}] en orden de documento (una por línea coincidente)
   let searchCur = -1;    // resultado activo (para Ctrl+N / Ctrl+P)
+  let searchArmed = null;  // consulta con la que ya se enfocó el cajón (ver focusSearch)
 
   function searchOpen() { return document.body.classList.contains('search-open'); }
   function updateSideOpen() {
@@ -1125,8 +1127,26 @@
     btnSearch.classList.toggle('active', on);
     updateSideOpen();
     localStorage.setItem('mdlive-search', on ? '1' : '0');
-    if (on) { searchInput.focus(); searchInput.select(); runSearch(searchInput.value); }
+    if (on) { searchInput.focus(); searchInput.select(); searchArmed = searchInput.value; runSearch(searchInput.value); }
     else { runSearch(''); }
+  }
+  // salta a la coincidencia siguiente (o anterior con back), dando la vuelta
+  function searchStep(back) {
+    const n = searchHits.length; if (!n) return;
+    gotoHit(((searchCur + (back ? -1 : 1)) % n + n) % n, false);
+  }
+  // Ctrl+F (Ctrl+Shift+F hacia atrás): enfoca el cajón y SELECCIONA lo que ya hubiera
+  // escrito, para poder sobrescribirlo sin borrar. Si se vuelve a pulsar con el cajón
+  // enfocado y la misma consulta, avanza a la coincidencia siguiente (como Ctrl+N);
+  // en cuanto se sobrescribe la búsqueda, la siguiente pulsación vuelve a seleccionar.
+  function focusSearch(back) {
+    if (!searchOpen()) { setSearch(true); return; }
+    if (searchInput.value && searchInput.value === searchArmed && document.activeElement === searchInput) {
+      searchStep(back);
+      return;
+    }
+    searchInput.focus(); searchInput.select();
+    searchArmed = searchInput.value;
   }
   function toggleSearch() { setSearch(!searchOpen()); }
   btnSearch.onclick = toggleSearch;
@@ -1135,8 +1155,9 @@
     e.stopPropagation();  // el input gestiona sus teclas; que NO lleguen también al handler global
     if ((e.ctrlKey || e.metaKey) && (e.key === 'h' || e.key === 'H')) { e.preventDefault(); toggleHelp(); }
     else if (e.key === 'Escape') { e.preventDefault(); setSearch(false); }
-    else if ((e.ctrlKey || e.metaKey) && (e.key === 'n' || e.key === 'N')) { e.preventDefault(); if (searchHits.length) gotoHit((searchCur + 1) % searchHits.length, false); }
-    else if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); if (searchHits.length) gotoHit((searchCur - 1 + searchHits.length) % searchHits.length, false); }
+    else if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); focusSearch(e.shiftKey); }
+    else if ((e.ctrlKey || e.metaKey) && (e.key === 'n' || e.key === 'N')) { e.preventDefault(); searchStep(false); }
+    else if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); searchStep(true); }
   });
 
   // ===== Reparto vertical del panel (N secciones apilables) =================
