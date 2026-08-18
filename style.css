@@ -330,9 +330,15 @@ body.recent-open #recent-sec { display: flex; }
   border-top: 1px solid var(--toc-guide);
 }
 #toc-list .toc-tw {
-  flex: 0 0 var(--toc-indent); width: var(--toc-indent); text-align: center; cursor: default;
-  color: var(--muted); font-size: 10px; padding-top: .42em; user-select: none;
+  flex: 0 0 var(--toc-indent); width: var(--toc-indent); cursor: default;
+  color: var(--muted); user-select: none;
   align-self: stretch; position: relative;
+  display: flex; align-items: center; justify-content: center;
+}
+/* tamano del triangulo: subelo/bajalo aqui (la caja no cambia, va centrado) */
+#toc-list .toc-tw svg {
+  width: 13px; height: 13px; display: block; fill: none; stroke: currentColor;
+  stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round;
 }
 /* hoja (sin hijos): la horizontal del codo sigue hasta el texto */
 #toc-list .toc-tw.tied:not(.has)::before {

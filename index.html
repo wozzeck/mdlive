@@ -752,6 +752,10 @@
   tocList.addEventListener('mousedown', hideTocTip);
   tocList.addEventListener('scroll', hideTocTip, { passive: true });
 
+  // triangulos de expandir/contraer del indice: SVG (chevron de Lucide) en vez de los
+  // caracteres de texto, que a 10px salian diminutos y dependian de la fuente del sistema
+  const TW_CLOSED = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>';
+  const TW_OPEN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
   function buildToc() {
     headings = parseHeadings(docSource);
     hideTocTip();
@@ -800,7 +804,7 @@
       tw.className = 'toc-tw' + (lvl > 0 ? ' tied' : '');
       if (endOf(i) > i + 1) {
         tw.classList.add('has');
-        tw.textContent = collapsed.has(i) ? '▸' : '▾';
+        tw.innerHTML = collapsed.has(i) ? TW_CLOSED : TW_OPEN;
         tw.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); toggleCollapse(i); });
       }
       const a = document.createElement('a');
@@ -818,7 +822,7 @@
   function toggleCollapse(i) {
     if (collapsed.has(i)) collapsed.delete(i); else collapsed.add(i);
     const tw = tocLinks[i] && tocLinks[i].row.querySelector('.toc-tw');
-    if (tw) tw.textContent = collapsed.has(i) ? '▸' : '▾';
+    if (tw) tw.innerHTML = collapsed.has(i) ? TW_CLOSED : TW_OPEN;
     applyCollapsed();
   }
   // Un encabezado dentro de un <details> cerrado no está a la vista, pero WebKit le sigue
