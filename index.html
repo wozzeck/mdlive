@@ -727,16 +727,47 @@
     headings = parseHeadings(docSource);
     tocList.innerHTML = ''; tocLinks = []; activeIdx = -1;
     if (!headings.length) { tocList.innerHTML = '<div class="toc-empty">Sin encabezados</div>'; return; }
-    const minLvl = Math.min.apply(null, headings.map((h) => h.level));
+    // profundidad en el ARBOL, no numero de almohadillas: si el documento se salta un nivel
+    // (# -> ###) el hijo cuelga igualmente del ancestro anterior, sin huecos en las guias
+    const depth = [], open = [];   // open = niveles de los ancestros abiertos
+    headings.forEach((h, i) => {
+      while (open.length && open[open.length - 1] >= h.level) open.pop();
+      depth[i] = open.length;
+      open.push(h.level);
+    });
+    // ultimo hermano = su rama NO sigue hacia abajo (codo └ en vez de ├, y sin vertical
+    // para sus descendientes). De atras hacia delante: al llegar a un nodo de profundidad
+    // D, lo visto mas adentro pertenecia a otro padre -> se reinicia
+    const isLast = [], seen = [];
+    for (let i = headings.length - 1; i >= 0; i--) {
+      const D = depth[i];
+      isLast[i] = !seen[D];
+      seen[D] = true;
+      for (let d = D + 1; d < seen.length; d++) seen[d] = false;
+    }
+    const path = [];   // indice del ancestro de cada profundidad mientras recorremos
     headings.forEach((h, i) => {
       const row = document.createElement('div');
-      const lvl = h.level - minLvl;
-      // --lvl = sangria (padding de la fila, asi el triangulo va con el nivel);
-      // .lvlN = tono del sombreado (ver style.css, editable en vivo)
-      row.className = 'toc-row lvl' + Math.min(lvl, 5);
-      row.style.setProperty('--lvl', lvl);
+      const lvl = depth[i];
+      row.className = 'toc-row';
+      path[lvl] = i; path.length = lvl + 1;
+      // guias del arbol: una columna por nivel de sangria. La ultima (la del padre) es el
+      // codo ├ o └; en las anteriores va la vertical si esa rama continua hacia abajo.
+      // OJO: la columna d es la del ancestro de profundidad d+1 (el que tiene ahi su codo),
+      // no la del de profundidad d
+      for (let d = 0; d < lvl - 1; d++) {
+        const g = document.createElement('span');
+        g.className = 'toc-g' + (isLast[path[d + 1]] ? '' : ' v');
+        row.appendChild(g);
+      }
+      if (lvl > 0) {
+        const g = document.createElement('span');
+        g.className = 'toc-g elbow' + (isLast[i] ? ' last' : '');
+        row.appendChild(g);
+      }
       const tw = document.createElement('span');
-      tw.className = 'toc-tw';
+      // en una hoja la guia horizontal sigue hasta el texto (como en un arbol de ficheros)
+      tw.className = 'toc-tw' + (lvl > 0 ? ' tied' : '');
       if (endOf(i) > i + 1) {
         tw.classList.add('has');
         tw.textContent = collapsed.has(i) ? '▸' : '▾';
