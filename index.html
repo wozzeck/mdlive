@@ -1089,6 +1089,40 @@
          + '<span class="af">' + escHtml(line.slice(col + qlen, col + qlen + CTX)) + '</span>';
   }
 
+  // La lista de resultados enseña la línea del FUENTE. Si la línea trae HTML (p.ej. un
+  // <span style="background:…"> o un <mark> para resaltar en amarillo) se veía la etiqueta
+  // entera y la lista quedaba ilegible. Aquí se quitan las etiquetas y se decodifican las
+  // entidades corrientes, guardando el mapa limpio->fuente para poder resaltar la
+  // coincidencia en su sitio. Se exige que el "<" abra una etiqueta de verdad, para no
+  // comerse texto en prosa del tipo "si a < b y c > d".
+  const ENTS = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&apos;': "'", '&nbsp;': ' ' };
+  const TAG_RE = /^<\/?[a-zA-Z][a-zA-Z0-9-]*(\s[^<>]*)?>/;
+  function cleanLine(line) {
+    let out = '', i = 0; const map = [];
+    while (i < line.length) {
+      if (line[i] === '<') {
+        const m = TAG_RE.exec(line.slice(i));
+        if (m) { i += m[0].length; continue; }
+      }
+      if (line[i] === '&') {
+        const j = line.indexOf(';', i);
+        const ent = (j !== -1 && j - i <= 8) ? ENTS[line.slice(i, j + 1).toLowerCase()] : null;
+        if (ent) { out += ent; map.push(i); i = j + 1; continue; }
+      }
+      out += line[i]; map.push(i); i++;
+    }
+    return { text: out, map };
+  }
+  // fragmento a enseñar: sobre el texto limpio si la coincidencia tiene sitio ahí; si cae
+  // DENTRO de una etiqueta (buscar "span", "mark"…), la línea cruda, que es donde está
+  function hitSnippet(line, clean, col, qlen) {
+    let s = -1;
+    for (let k = 0; k < clean.text.length; k++) if (clean.map[k] >= col) { s = k; break; }
+    let e = s;
+    while (s >= 0 && e < clean.text.length && clean.map[e] < col + qlen) e++;
+    return (s >= 0 && e > s) ? snippetHtml(clean.text, s, e - s) : snippetHtml(line, col, qlen);
+  }
+
   const MAX_RESULTS = 800;
   function runSearch(raw) {
     const q = (raw || '').trim();
@@ -1104,14 +1138,16 @@
       const frag = document.createDocumentFragment();
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i], lower = line.toLowerCase();
+        let clean = null;   // solo se limpia la línea si tiene alguna coincidencia
         // UNA entrada por cada ocurrencia de la línea (no solo la primera)
         for (let c = lower.indexOf(ql); c !== -1; c = lower.indexOf(ql, c + ql.length)) {
           count++;
           const occ = occGlobal++;  // índice de ocurrencia global -> mapea al <mark> del visor
           if (shown < MAX_RESULTS) {
+            if (!clean) clean = cleanLine(line);
             const row = document.createElement('div');
             row.className = 'sr';
-            row.innerHTML = '<span class="ln">' + (i + 1) + '</span><span class="tx">' + snippetHtml(line, c, ql.length) + '</span>';
+            row.innerHTML = '<span class="ln">' + (i + 1) + '</span><span class="tx">' + hitSnippet(line, clean, c, ql.length) + '</span>';
             const idx = searchHits.length;
             searchHits.push({ line: i + 1, col: c, occ, row });
             row.addEventListener('click', () => gotoHit(idx, true));
