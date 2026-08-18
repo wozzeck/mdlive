@@ -723,8 +723,33 @@
     for (const c of collapsed) if (c < i && i < endOf(c)) return true;
     return false;
   }
+  // Tooltip propio para los títulos cortados con "…". El title nativo lo temporiza el
+  // sistema (~1 s en WebKitGTK, no es configurable) y aquí interesa instantáneo. Va en
+  // <body> y position:fixed porque el panel recorta (overflow) y el texto completo, por
+  // definición, no cabe dentro.
+  let tocTip = null;
+  function hideTocTip() { if (tocTip) tocTip.classList.remove('show'); }
+  function showTocTip(a) {
+    if (a.scrollWidth <= a.clientWidth + 1) return hideTocTip();   // cabe entero: no hace falta
+    if (!tocTip) { tocTip = document.createElement('div'); tocTip.className = 'mdlive-tip'; document.body.appendChild(tocTip); }
+    tocTip.textContent = a.textContent;
+    tocTip.classList.add('show');
+    // se ancla bajo la fila (sin taparla) y se mete dentro de la ventana
+    const r = a.getBoundingClientRect(), t = tocTip.getBoundingClientRect();
+    tocTip.style.left = Math.max(4, Math.min(r.left - 4, window.innerWidth - t.width - 4)) + 'px';
+    tocTip.style.top = Math.max(4, Math.min(r.bottom + 2, window.innerHeight - t.height - 4)) + 'px';
+  }
+  tocList.addEventListener('mouseover', (e) => {
+    const a = e.target.closest && e.target.closest('a');
+    if (a && tocList.contains(a)) showTocTip(a); else hideTocTip();
+  });
+  tocList.addEventListener('mouseleave', hideTocTip);
+  tocList.addEventListener('mousedown', hideTocTip);
+  tocList.addEventListener('scroll', hideTocTip, { passive: true });
+
   function buildToc() {
     headings = parseHeadings(docSource);
+    hideTocTip();
     tocList.innerHTML = ''; tocLinks = []; activeIdx = -1;
     if (!headings.length) { tocList.innerHTML = '<div class="toc-empty">Sin encabezados</div>'; return; }
     // profundidad en el ARBOL, no numero de almohadillas: si el documento se salta un nivel
@@ -774,7 +799,7 @@
         tw.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); toggleCollapse(i); });
       }
       const a = document.createElement('a');
-      a.href = '#'; a.textContent = h.text; a.title = h.text;
+      a.href = '#'; a.textContent = h.text;   // el tooltip lo pone tocTip (ver mas abajo)
       a.addEventListener('click', (e) => { e.preventDefault(); gotoHeading(i); });
       row.appendChild(tw); row.appendChild(a);
       tocList.appendChild(row);

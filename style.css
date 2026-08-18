@@ -342,6 +342,17 @@ body.recent-open #recent-sec { display: flex; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 #toc-list .toc-row.active a { color: var(--link); font-weight: 600; }
+/* tooltip del indice (titulo completo cuando se corta con "…"): propio y no el nativo,
+   que el sistema retrasa ~1 s */
+.mdlive-tip {
+  position: fixed; z-index: 70; display: none;
+  max-width: min(60ch, 80vw); padding: .25em .55em;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.14);
+  font-size: 12.5px; line-height: 1.35; pointer-events: none;
+}
+.mdlive-tip.show { display: block; }
 #toc-list .toc-empty { color: var(--muted); font-style: italic; padding: .6rem .85rem; font-size: 13px; }
 /* tirador de redimensionado en el borde derecho del panel */
 #toc-resizer {
