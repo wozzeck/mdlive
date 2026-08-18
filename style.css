@@ -239,8 +239,14 @@ body.recent-open #recent-sec { display: flex; }
 /* max-width:max-content => un lado corto (coincidencia al inicio/fin de línea) no
    ocupa su mitad: cede el espacio al otro lado, que muestra más texto. Si ambos
    son largos, flex reparte igual y la coincidencia queda centrada. */
-#search-results .sr .bf, #search-results .sr .af { flex: 1 1 0; min-width: 0; max-width: max-content; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#search-results .sr .bf { direction: rtl; }   /* … a la izquierda (el texto latino se sigue leyendo LTR) */
+/* white-space: PRE, no nowrap: nowrap colapsa los espacios y se comia el que separa el
+   fragmento de la coincidencia ("Pendientes" + " a la vuelta" salia pegado) */
+#search-results .sr .bf, #search-results .sr .af { flex: 1 1 0; min-width: 0; max-width: max-content; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+/* direction: rtl -> el "…" cae a la IZQUIERDA y se conserva el final del fragmento, que
+   es el pegado a la coincidencia. El texto va dentro de un <bdi> (aislamiento bidi): sin
+   el, los caracteres neutros del principio de la linea (>, |, #, comillas) se reordenaban
+   al final del fragmento y ademas salian espejados (un "> " de cita se veia como "<") */
+#search-results .sr .bf { direction: rtl; }
 #search-results .sr .tx > mark { flex: 0 0 auto; white-space: pre; }
 #search-results .sr mark, #content mark.search-hit, .cm-mdblock mark.search-hit {
   background: #fde047; color: inherit; border-radius: 2px; padding: 0 .5px;

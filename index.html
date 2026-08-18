@@ -1082,11 +1082,19 @@
   // snippet de una coincidencia (en col): tres partes antes|match|después con todo el
   // contexto (acotado); el CSS centra el match (bf/af con igual ancho) y recorta con …
   // a cada lado según el ancho del panel (responsive, sin recalcular en JS).
+  const NBSP = '\u00a0';
   function snippetHtml(line, col, qlen) {
     const CTX = 220;  // contexto máx. por lado (suficiente para anchos grandes del panel)
-    return '<span class="bf">' + escHtml(line.slice(Math.max(0, col - CTX), col)) + '</span>'
+    // los espacios pegados a la coincidencia se pintan como NBSP: los del borde de una
+    // línea "cuelgan" (no cuentan para el max-content de la caja) y desaparecían, con lo
+    // que el texto salía pegado a la coincidencia ("Pendientes" + "a la vuelta")
+    const bf = line.slice(Math.max(0, col - CTX), col).replace(/ +$/, (m) => NBSP.repeat(m.length));
+    const af = line.slice(col + qlen, col + qlen + CTX).replace(/^ +/, (m) => NBSP.repeat(m.length));
+    // el fragmento previo va en <bdi>: su caja es rtl (para que el "…" salga a la
+    // izquierda) y sin aislar, los neutros del principio de la linea se recolocaban
+    return '<span class="bf"><bdi>' + escHtml(bf) + '</bdi></span>'
          + '<mark>' + escHtml(line.slice(col, col + qlen)) + '</mark>'
-         + '<span class="af">' + escHtml(line.slice(col + qlen, col + qlen + CTX)) + '</span>';
+         + '<span class="af">' + escHtml(af) + '</span>';
   }
 
   // La lista de resultados enseña la línea del FUENTE. Si la línea trae HTML (p.ej. un
