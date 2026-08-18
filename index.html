@@ -816,6 +816,17 @@
     if (tw) tw.textContent = collapsed.has(i) ? '▸' : '▾';
     applyCollapsed();
   }
+  // Un encabezado dentro de un <details> cerrado no está a la vista, pero WebKit le sigue
+  // dando una caja: el scroll y el halo se iban al punto que le tocaría con el <details>
+  // desplegado, con lo que no se veía nada. El destino pasa a ser entonces el <details>
+  // cerrado más EXTERNO (su resumen), que es lo que hay que desplegar para llegar al
+  // título. Se mira por ancestro, no por rectángulo, que aquí no es de fiar.
+  function visibleTarget(el) {
+    if (!el) return null;
+    let p = el, outer = null;
+    while ((p = p.parentElement)) if (p.tagName === 'DETAILS' && !p.open) outer = p;
+    return outer ? (outer.querySelector(':scope > summary') || outer) : el;
+  }
   // alto de la barra de títulos fijados (0 si no está visible)
   function pinBarH() { return (pinOn() && pinBar.classList.contains('show')) ? pinBar.offsetHeight : 0; }
   // y (en el viewport) del encabezado i: por el DOM en el visor, por coordsAtPos al editar
@@ -826,7 +837,7 @@
       const c = cmView.coordsAtPos(doc.line(Math.min(doc.lines, h.line + 1)).from);
       return c ? c.top : null;
     }
-    const el = content.querySelectorAll('h1,h2,h3,h4,h5,h6')[i];
+    const el = visibleTarget(content.querySelectorAll('h1,h2,h3,h4,h5,h6')[i]);
     return el ? el.getBoundingClientRect().top : null;
   }
   // recuadro (viewport) del TEXTO del encabezado i, para el halo: el elemento (o la línea
@@ -842,7 +853,7 @@
         el = base && base.closest('.cm-line');
       } catch (_) { return null; }
     } else {
-      el = content.querySelectorAll('h1,h2,h3,h4,h5,h6')[i];
+      el = visibleTarget(content.querySelectorAll('h1,h2,h3,h4,h5,h6')[i]);
     }
     if (!el) return null;
     const r = document.createRange();
@@ -861,7 +872,7 @@
       cmView.dispatch({ selection: { anchor: pos }, effects: window.CM.view.EditorView.scrollIntoView(pos, { y: 'start', yMargin: margin() + 4 }) });
       cmView.focus();
     } else {
-      const el = content.querySelectorAll('h1,h2,h3,h4,h5,h6')[i];
+      const el = visibleTarget(content.querySelectorAll('h1,h2,h3,h4,h5,h6')[i]);
       if (el) { const sc = document.scrollingElement; sc.scrollTop = sc.scrollTop + el.getBoundingClientRect().top - margin(); }
     }
     // al llegar, la barra pasa a mostrar otra cadena de ancestros y cambia de alto:
@@ -900,7 +911,11 @@
     const els = content.querySelectorAll('h1,h2,h3,h4,h5,h6');
     const lim = Math.min(els.length, headings.length);
     const t = [];
-    for (let i = 0; i < lim; i++) t.push(els[i].getBoundingClientRect().top);
+    for (let i = 0; i < lim; i++) {
+      // los encabezados tapados por un <details> cerrado no cuentan (null): no puedes
+      // "estar" en un título que no se ve, ni en el índice ni en la chincheta
+      t.push(visibleTarget(els[i]) === els[i] ? els[i].getBoundingClientRect().top : null);
+    }
     return t;
   }
   function topsEdit() {
