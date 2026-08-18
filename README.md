@@ -92,6 +92,8 @@ xdg-mime default mdlive.desktop text/markdown
 
 ## Notas
 
+Los iconos de la barra de botones son [Lucide](https://lucide.dev) (licencia ISC), incrustados como SVG en `index.html`; los atributos de trazo se declaran una vez en CSS.
+
 El bundle de CodeMirror (`vendor/codemirror.js`) se construye con esbuild a partir de `@codemirror/{state,view,commands,language,lang-markdown}` exponiendo `window.CM`; el directorio de build (`.cmbuild/`) no se versiona, pero el bundle final sí.
 
 El historial de **documentos recientes** se guarda en `$XDG_DATA_HOME/mdlive/recent.json` (por defecto `~/.local/share/mdlive/recent.json`). Cada ventana publica además su existencia en `$XDG_RUNTIME_DIR/mdlive/instances/` (efímero) para poder enfocar la ventana ya abierta en lugar de duplicarla; ese enfoque usa `wmctrl` (o `xdotool` como alternativa) en X11.

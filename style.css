@@ -380,8 +380,10 @@ body.help-open #help-overlay { display: flex; align-items: center; justify-conte
 #help-modal h3 { margin: 0 0 .5rem; font-size: .8em; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
 #help-close {
   position: absolute; top: .55rem; right: .75rem; border: 0; background: transparent;
-  color: var(--muted); font-size: 1.7em; line-height: 1; cursor: pointer; padding: 0 .2em;
+  color: var(--muted); line-height: 1; cursor: pointer; padding: .2rem;
+  display: flex; align-items: center; justify-content: center;
 }
+#help-close svg { width: 18px; height: 18px; }
 #help-close:hover { color: var(--fg); }
 .help-cols { display: flex; gap: 2.2rem; flex-wrap: wrap; }
 .help-cols section { flex: 1 1 320px; }
