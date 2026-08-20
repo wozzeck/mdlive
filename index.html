@@ -72,6 +72,7 @@
           <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Buscar (selecciona lo escrito; repetir avanza a la siguiente coincidencia)</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></td><td>Igual, pero hacia la coincidencia anterior</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd> / <kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Coincidencia siguiente / anterior</td></tr>
+          <tr><td><kbd>Intro</kbd> / <kbd>Shift</kbd>+<kbd>Intro</kbd></td><td>En el cajón de búsqueda: primera coincidencia y, repitiendo, siguiente / anterior</td></tr>
           <tr><td><kbd>Ctrl</kbd>+rueda</td><td>Zoom de solo texto</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>0</kbd></td><td>Restablecer el zoom</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>H</kbd></td><td>Esta ayuda</td></tr>
@@ -1061,6 +1062,7 @@
   let searchHits = [];   // [{line, col, row}] en orden de documento (una por línea coincidente)
   let searchCur = -1;    // resultado activo (para Ctrl+N / Ctrl+P)
   let searchArmed = null;  // consulta con la que ya se enfocó el cajón (ver focusSearch)
+  let enterArmed = null;  // consulta con la que ya se pulsó intro (ver searchEnter)
 
   function searchOpen() { return document.body.classList.contains('search-open'); }
   function updateSideOpen() {
@@ -1296,6 +1298,16 @@
     searchInput.focus(); searchInput.select();
     searchArmed = searchInput.value;
   }
+  // Intro en el cajón: va a la PRIMERA coincidencia y, mientras no se cambie el texto
+  // buscado, cada intro pasa a la siguiente (mayúsculas+intro, a la anterior; con la
+  // primera pulsación, a la última). El foco se queda en el cajón para poder repetir.
+  function searchEnter(back) {
+    if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; runSearch(searchInput.value); }
+    const n = searchHits.length; if (!n) return;
+    if (enterArmed === searchInput.value && searchCur >= 0) searchStep(back);
+    else gotoHit(back ? n - 1 : 0, false);
+    enterArmed = searchInput.value;
+  }
   function toggleSearch() { setSearch(!searchOpen()); }
   btnSearch.onclick = toggleSearch;
   searchInput.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => runSearch(searchInput.value), 180); });
@@ -1306,6 +1318,7 @@
     else if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); focusSearch(e.shiftKey); }
     else if ((e.ctrlKey || e.metaKey) && (e.key === 'n' || e.key === 'N')) { e.preventDefault(); searchStep(false); }
     else if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); searchStep(true); }
+    else if (e.key === 'Enter') { e.preventDefault(); searchEnter(e.shiftKey); }
   });
 
   // ===== Reparto vertical del panel (N secciones apilables) =================
