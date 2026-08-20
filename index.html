@@ -232,6 +232,16 @@
   // ===== MODO EDICION: CodeMirror 6 + live-preview por bloques ==============
   // Agrupa lineas en bloques (respeta fences). Cada bloque que NO toca el
   // cursor se reemplaza por un widget renderizado; el del cursor queda en fuente.
+  // Hasta donde llega el bloque i CONTANDO las lineas en blanco que le siguen: son las que
+  // absorbe su widget (para que no queden lineas vacias entre bloques renderizados). El
+  // cursor cuenta como "dentro" del bloque tambien si esta en ellas -- ahi es donde cae al
+  // pulsar intro al final del bloque, y si el bloque se dibujaba como widget el caret se
+  // quedaba DENTRO de un rango sustituido: desaparecia y no se podia escribir (la tecla
+  // intro parecia no funcionar).
+  function blockEnd(doc, blocks, i) {
+    const next = blocks[i + 1];
+    return next ? doc.lineAt(next.from - 1).to : doc.length;
+  }
   function blocksOf(state) {
     const doc = state.doc, res = [];
     let from = null, lines = [], inFence = false, ch = '';
@@ -351,13 +361,22 @@
       const gapAfter = (i) => (i + 1 < blocks.length) ? Math.max(sp[i].bottom, sp[i + 1].top) : sp[i].bottom;
       for (let i = 0; i < blocks.length; i++) {
         const blk = blocks[i];
-        if (sel.from <= blk.to && sel.to >= blk.from) {
+        const nextB = blocks[i + 1];
+        // El widget ABSORBE las lineas en blanco que siguen, hasta el inicio del bloque
+        // siguiente: asi NO quedan .cm-line vacias visibles entre bloques.
+        const absTo = blockEnd(doc, blocks, i);
+        if (sel.from <= absTo && sel.to >= blk.from) {
           // bloque del cursor: se muestra como FUENTE y se sombrea linea a linea. El hueco
           // de ARRIBA ya lo pone el widget anterior (su padding-bottom); el de ABAJO lo pone
           // un GapWidget que sustituye a las lineas en blanco, con la altura exacta del visor
           // (+ padB: el padding-bottom y el borde que un h1/h2 renderizado si tiene).
-          const nextB = blocks[i + 1];
           const belowGap = nextB ? (sp[i].padB + gapAfter(i)) : 0;  // rem
+          const blankFrom = nextB ? doc.line(doc.lineAt(blk.to).number + 1).from : -1;
+          const blankTo = nextB ? absTo : -1;
+          // Si el caret esta en esas lineas en blanco NO se sustituyen por el hueco: se
+          // dejan como lineas de verdad (y sombreadas) para que tenga donde ponerse.
+          const caretBelow = nextB && blankTo >= blankFrom && sel.to >= blankFrom && sel.from <= blankTo;
+          const lastLine = doc.lineAt(caretBelow ? blankTo : blk.to).number;
           let ln = doc.lineAt(blk.from), prevItem = false;
           for (;;) {
             const item = ITEM_RE.test(ln.text);
@@ -365,21 +384,15 @@
             const cls = hm ? ('cm-editing cm-edit-h' + hm[1].length) : ((item && prevItem) ? 'cm-editing cm-li-gap' : 'cm-editing');
             b.add(ln.from, ln.from, lineDeco(cls));
             prevItem = item;
-            if (ln.to >= blk.to) break;
+            if (ln.number >= lastLine) break;
             ln = doc.line(ln.number + 1);
           }
-          if (nextB) {
-            const blankFrom = doc.line(doc.lineAt(blk.to).number + 1).from;
-            const blankTo = doc.lineAt(nextB.from - 1).to;
-            if (blankTo >= blankFrom) b.add(blankFrom, blankTo, Decoration.replace({ block: true, widget: new GapWidget(belowGap) }));
+          if (nextB && !caretBelow && blankTo >= blankFrom) {
+            b.add(blankFrom, blankTo, Decoration.replace({ block: true, widget: new GapWidget(belowGap) }));
           }
           continue;
         }
-        // El widget ABSORBE las lineas en blanco que siguen, hasta el inicio del
-        // bloque siguiente: asi NO quedan .cm-line vacias visibles entre bloques.
-        const next = blocks[i + 1];
-        const to = next ? doc.lineAt(next.from - 1).to : doc.length;
-        b.add(blk.from, to, Decoration.replace({ widget: new MdWidget(blk.text, blk.from, searchQuery, gapAfter(i)), block: true }));
+        b.add(blk.from, absTo, Decoration.replace({ widget: new MdWidget(blk.text, blk.from, searchQuery, gapAfter(i)), block: true }));
       }
       return b.finish();
     }
@@ -459,12 +472,16 @@
   // atendemos nosotros flechas y páginas: si el destino que calcula CM se sale de la
   // región en fuente, saltamos al bloque vecino (que pasa a mostrarse como fuente); si se
   // queda dentro, dejamos actuar a CM (líneas con wrap, bloques largos).
-  // region en FUENTE = union de los bloques que toca la seleccion (build() los pinta asi)
+  // region en FUENTE = union de los bloques que toca la seleccion (build() los pinta asi),
+  // mas las lineas en blanco de debajo cuando la seleccion llega hasta ellas
   function cmSourceRange(st, blocks) {
-    const sel = st.selection.main;
+    const sel = st.selection.main, doc = st.doc;
     let from = -1, to = -1;
-    for (const blk of blocks) {
-      if (sel.from <= blk.to && sel.to >= blk.from) { if (from < 0) from = blk.from; to = blk.to; }
+    for (let i = 0; i < blocks.length; i++) {
+      const blk = blocks[i], end = blockEnd(doc, blocks, i);
+      if (sel.from > end || sel.to < blk.from) continue;
+      if (from < 0) from = blk.from;
+      to = (sel.to > blk.to) ? end : blk.to;
     }
     return { from, to };
   }
@@ -480,7 +497,7 @@
     if (src.from < 0) return false;
     const byLine = view.moveVertically(sel, forward).head;
     if (byLine >= src.from && byLine <= src.to) return false;   // sigue en fuente: deja a CM
-    const i = blocks.findIndex((blk) => sel.head >= blk.from && sel.head <= blk.to);
+    const i = blocks.findIndex((blk, k) => sel.head >= blk.from && sel.head <= blockEnd(st.doc, blocks, k));
     const target = i < 0 ? null : blocks[i + (forward ? 1 : -1)];
     if (!target) return false;
     const col = sel.head - st.doc.lineAt(sel.head).from;
