@@ -378,11 +378,14 @@
           const belowGap = nextB ? (sp[i].padB + gapAfter(i)) : 0;  // rem
           const blankFrom = nextB ? doc.line(doc.lineAt(blk.to).number + 1).from : -1;
           const blankTo = nextB ? absTo : -1;
-          // Si el caret esta en esas lineas en blanco (ahi cae al pulsar intro al final del
-          // bloque) hay que dejarle UNA linea de verdad donde ponerse: la suya. Las demas se
-          // esconden y el hueco de debajo se descuenta el alto de esa linea, para que el
-          // espaciado siga siendo el del visor y no aparezca un salto.
-          const caretBelow = nextB && blankTo >= blankFrom && sel.to >= blankFrom && sel.from <= blankTo;
+          // Si el caret esta en las lineas en blanco de debajo (ahi cae al pulsar intro al
+          // final del bloque), la zona en fuente llega HASTA SU LINEA: cada intro deja una
+          // linea en blanco mas, sombreada como el resto del bloque. Las que queden por
+          // debajo se esconden en el hueco, al que se descuenta el alto de una linea para
+          // que el espaciado total siga siendo el del visor.
+          const cl = (nextB && blankTo >= blankFrom && sel.to >= blankFrom && sel.from <= blankTo)
+            ? doc.lineAt(sel.head) : null;
+          const lastLine = (cl || doc.lineAt(blk.to)).number;
           let ln = doc.lineAt(blk.from), prevItem = false;
           for (;;) {
             const item = ITEM_RE.test(ln.text);
@@ -390,17 +393,12 @@
             const cls = hm ? ('cm-editing cm-edit-h' + hm[1].length) : ((item && prevItem) ? 'cm-editing cm-li-gap' : 'cm-editing');
             b.add(ln.from, ln.from, lineDeco(cls));
             prevItem = item;
-            if (ln.to >= blk.to) break;
+            if (ln.number >= lastLine) break;
             ln = doc.line(ln.number + 1);
           }
           if (nextB && blankTo >= blankFrom) {
-            if (!caretBelow) {
-              b.add(blankFrom, blankTo, Decoration.replace({ block: true, widget: new GapWidget(belowGap) }));
-            } else {
-              const cl = doc.lineAt(sel.head);
-              if (cl.from > blankFrom) b.add(blankFrom, doc.line(cl.number - 1).to, Decoration.replace({ block: true, widget: new GapWidget(0) }));
-              if (cl.to < blankTo) b.add(doc.line(cl.number + 1).from, blankTo, Decoration.replace({ block: true, widget: new GapWidget(Math.max(0, belowGap - LINE_REM)) }));
-            }
+            if (!cl) b.add(blankFrom, blankTo, Decoration.replace({ block: true, widget: new GapWidget(belowGap) }));
+            else if (cl.to < blankTo) b.add(doc.line(cl.number + 1).from, blankTo, Decoration.replace({ block: true, widget: new GapWidget(Math.max(0, belowGap - LINE_REM)) }));
           }
           continue;
         }
