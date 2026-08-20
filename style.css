@@ -117,7 +117,11 @@ body {
 /* el editor usa la fuente de LECTURA (sans), igual que el visor; el codigo
    dentro de los bloques renderizados sigue saliendo mono por .markdown-body */
 .cm-editor .cm-scroller { line-height: 1.65; font-family: var(--font-body); }
-.cm-editor .cm-content { padding: 0; }
+/* .cm-content es un item flex con `flex-shrink: 1` pero `min-width: auto`, asi que no baja
+   de su ancho min-content: un bloque renderizado con una tabla ancha lo estiraba y la tabla
+   se salia del ancho del visor (su `max-width: 100%` se resolvia contra una caja mas ancha).
+   Con min-width: 0 la caja es exactamente la del modo lectura y la tabla scrollea sola. */
+.cm-editor .cm-content { padding: 0; min-width: 0; }
 .cm-editor .cm-line { padding: 0; }
 /* hueco invisible que iguala el espaciado del visor entre bloques al editar */
 .cm-blockgap { user-select: none; }
@@ -134,6 +138,12 @@ body {
 .cm-mdblock.markdown-body {
   max-width: none; margin: 0; padding: 0; cursor: text; white-space: normal;
   display: flow-root;
+  /* CM pone en .cm-content `overflow-wrap: anywhere` (+ word-break) para el wrap del
+     codigo, y se hereda al bloque renderizado. `anywhere` SI cuenta para el ancho
+     min-content, asi que las tablas repartian las columnas al minimo (una letra por
+     linea: "Épic a") y las palabras largas se partian por la mitad. Se vuelve al valor
+     del visor para que el bloque se maquete igual en los dos modos. */
+  overflow-wrap: normal; word-break: normal;
 }
 .cm-mdblock > :first-child { margin-top: 0; }
 .cm-mdblock > :last-child { margin-bottom: 0; }
