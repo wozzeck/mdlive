@@ -318,6 +318,10 @@
     // multiplicadores de tamano de fuente por nivel de encabezado (= .markdown-body hN)
     const FONT_MUL = [2, 1.5, 1.25, 1, .9, .85];
     const PRE_MUL = .86;   // .markdown-body pre { font-size: .86em } -> su margen em escala
+    // alto de una linea del editor en rem (= line-height de .cm-editor .cm-scroller). Solo
+    // se usa para descontar del hueco la linea en blanco donde este el caret; si se cambia
+    // el line-height en style.css el ajuste se desvia unos pocos px, nada mas.
+    const LINE_REM = 1.65;
     // margenes verticales (en rem) que .markdown-body daria a la linea indicada. Ojo: los
     // margenes van en em, asi que escalan con el font-size del propio elemento
     function lineMargins(txt) {
@@ -374,10 +378,11 @@
           const belowGap = nextB ? (sp[i].padB + gapAfter(i)) : 0;  // rem
           const blankFrom = nextB ? doc.line(doc.lineAt(blk.to).number + 1).from : -1;
           const blankTo = nextB ? absTo : -1;
-          // Si el caret esta en esas lineas en blanco NO se sustituyen por el hueco: se
-          // dejan como lineas de verdad (y sombreadas) para que tenga donde ponerse.
+          // Si el caret esta en esas lineas en blanco (ahi cae al pulsar intro al final del
+          // bloque) hay que dejarle UNA linea de verdad donde ponerse: la suya. Las demas se
+          // esconden y el hueco de debajo se descuenta el alto de esa linea, para que el
+          // espaciado siga siendo el del visor y no aparezca un salto.
           const caretBelow = nextB && blankTo >= blankFrom && sel.to >= blankFrom && sel.from <= blankTo;
-          const lastLine = doc.lineAt(caretBelow ? blankTo : blk.to).number;
           let ln = doc.lineAt(blk.from), prevItem = false;
           for (;;) {
             const item = ITEM_RE.test(ln.text);
@@ -385,11 +390,17 @@
             const cls = hm ? ('cm-editing cm-edit-h' + hm[1].length) : ((item && prevItem) ? 'cm-editing cm-li-gap' : 'cm-editing');
             b.add(ln.from, ln.from, lineDeco(cls));
             prevItem = item;
-            if (ln.number >= lastLine) break;
+            if (ln.to >= blk.to) break;
             ln = doc.line(ln.number + 1);
           }
-          if (nextB && !caretBelow && blankTo >= blankFrom) {
-            b.add(blankFrom, blankTo, Decoration.replace({ block: true, widget: new GapWidget(belowGap) }));
+          if (nextB && blankTo >= blankFrom) {
+            if (!caretBelow) {
+              b.add(blankFrom, blankTo, Decoration.replace({ block: true, widget: new GapWidget(belowGap) }));
+            } else {
+              const cl = doc.lineAt(sel.head);
+              if (cl.from > blankFrom) b.add(blankFrom, doc.line(cl.number - 1).to, Decoration.replace({ block: true, widget: new GapWidget(0) }));
+              if (cl.to < blankTo) b.add(doc.line(cl.number + 1).from, blankTo, Decoration.replace({ block: true, widget: new GapWidget(Math.max(0, belowGap - LINE_REM)) }));
+            }
           }
           continue;
         }
