@@ -583,7 +583,7 @@
       provide: (f) => EditorView.decorations.from(f),
     });
     const saveOnChange = EditorView.updateListener.of((u) => {
-      if (u.docChanged) { docSource = u.state.doc.toString(); lastFetched = docSource; scheduleSave(); }
+      if (u.docChanged) { docSource = u.state.doc.toString(); lastFetched = docSource; scheduleSave(); scheduleMinimapBuild(); }
     });
     return [
       history(),
@@ -654,6 +654,7 @@
     if (tocOpen()) buildToc(); else if (pinOn()) refreshHeadings();
     if (tocOpen() || pinOn()) requestAnimationFrame(updateSpy);
     restoreScrollAnchor(anchor);
+    scheduleMinimapBuild();
   }
   function exitEdit(anchor) {
     if (cmView) { docSource = cmView.state.doc.toString(); lastFetched = docSource; saveNow(); cmView.destroy(); cmView = null; }
@@ -1253,6 +1254,7 @@
     // resaltado in-situ
     if (editMode && cmView) {
       if (setSearchEffect) cmView.dispatch({ effects: setSearchEffect.of(q) });
+      scheduleMinimapBuild();   // el lienzo lleva su propio resaltado
     } else {
       clearHighlights(content);
       if (q) highlightInElement(content, q);
@@ -1586,38 +1588,56 @@
   function minimapOn() { return document.body.classList.contains('minimap-on'); }
 
   // Reconstruye el clon escalado (operación cara: clona el DOM -> debounced).
+  // El lienzo es una copia del documento a escala. En el VISOR se clona el DOM ya
+  // renderizado (#content). En EDICION no sirve: #content está oculto y desfasado, y el DOM
+  // de CodeMirror solo tiene el trozo visible (scroll virtual), así que se renderiza aquí el
+  // documento entero y se decora en el sitio (mermaid necesita medir, y para eso tiene que
+  // estar ya insertado). El ancho es el del contenedor de cada modo, que es el mismo.
   function buildMinimap() {
-    if (!minimapOn() || editMode) { minimapCanvas.innerHTML = ''; return; }
-    const rect = content.getBoundingClientRect();
-    const w = rect.width;
-    if (!w || !content.firstChild) { minimapCanvas.innerHTML = ''; return; }
+    if (!minimapOn()) { minimapCanvas.innerHTML = ''; return; }
+    const host = (editMode && cmView) ? editorHost : content;
+    const w = host.getBoundingClientRect().width;
+    if (!w || (host === content && !content.firstChild)) { minimapCanvas.innerHTML = ''; return; }
     mmScale = minimap.clientWidth / w;
     mmLastW = w;
-    // instantánea del documento; el clon es inerte (pointer-events:none en CSS)
-    const clone = content.cloneNode(true);
-    clone.removeAttribute('id');
-    // quita TODOS los ids del clon: evita ids duplicados en el DOM; las refs url(#..)
-    // de los SVG de mermaid resuelven contra los originales (que sí conservan su id)
-    clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
+    let clone;
+    if (host === content) {
+      // instantánea del documento; el clon es inerte (pointer-events:none en CSS)
+      clone = content.cloneNode(true);
+      clone.removeAttribute('id');
+      // quita TODOS los ids del clon: evita ids duplicados en el DOM; las refs url(#..)
+      // de los SVG de mermaid resuelven contra los originales (que sí conservan su id)
+      clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
+    } else {
+      clone = document.createElement('article');
+      clone.className = 'markdown-body';
+      clone.innerHTML = md.render(docSource);
+    }
     clone.style.boxSizing = 'border-box';  // border-box + ancho real => mismo wrapping/alto
     clone.style.width = w + 'px';
     clone.style.maxWidth = 'none';
     minimapCanvas.innerHTML = '';
     minimapCanvas.appendChild(clone);
     minimapCanvas.style.width = w + 'px';
+    if (host !== content) {
+      decorateSync(clone);   // ya insertado y con su ancho: mermaid mide bien
+      if (searchQuery) highlightInElement(clone, searchQuery);
+    }
     updateMinimap();
     renderMinimapMarks();
   }
   function scheduleMinimapBuild() {
-    if (!minimapOn() || editMode) return;
+    if (!minimapOn()) return;
     clearTimeout(mmBuildTimer);
-    mmBuildTimer = setTimeout(() => requestAnimationFrame(buildMinimap), 120);
+    // al editar el lienzo se re-renderiza entero (con mermaid y resaltado de código): se
+    // espera algo más para no rehacerlo entre pulsación y pulsación
+    mmBuildTimer = setTimeout(() => requestAnimationFrame(buildMinimap), editMode ? 400 : 120);
   }
   // Resize que NO cambia el ancho del contenido (solo el alto del viewport): basta
   // recomputar la geometría, el clon no cambia. Si cambia el ancho, reconstruye.
   function onMinimapResize() {
-    if (!minimapOn() || editMode) return;
-    const w = content.getBoundingClientRect().width;
+    if (!minimapOn()) return;
+    const w = ((editMode && cmView) ? editorHost : content).getBoundingClientRect().width;
     if (mmScale && w === mmLastW) updateMinimap();
     else scheduleMinimapBuild();
   }
@@ -1626,7 +1646,7 @@
   // recuadro va en top = scrollTop*s + t y, para documentos altos, el lienzo se desplaza
   // bajo el recuadro (que recorre el panel de arriba a abajo), igual que en Sublime/VSCode.
   function updateMinimap() {
-    if (!minimapOn() || editMode || !mmScale) return;
+    if (!minimapOn() || !mmScale) return;
     const sc = document.scrollingElement;
     const vh = sc.clientHeight;
     const H = sc.scrollHeight;
@@ -1654,14 +1674,19 @@
   // scroll sin recolocar cada marca. Se deduplican por pixel para no crear miles de divs.
   function renderMinimapMarks() {
     if (!minimapMarks) return;
-    if (!minimapOn() || editMode || !searchQuery || !mmScale) { minimapMarks.innerHTML = ''; return; }
-    const cTop = content.getBoundingClientRect().top;
+    if (!minimapOn() || !searchQuery || !mmScale) { minimapMarks.innerHTML = ''; return; }
+    // en edición las coincidencias se miden sobre el propio lienzo (no hay otro DOM
+    // renderizado): sus rects YA vienen a escala, así que no hay que multiplicar
+    const root = (editMode && cmView) ? minimapCanvas.firstElementChild : content;
+    if (!root) { minimapMarks.innerHTML = ''; return; }
+    const s = (root === content) ? mmScale : 1;
+    const cTop = root.getBoundingClientRect().top;
     const seen = new Set();
     const frag = document.createDocumentFragment();
-    content.querySelectorAll('mark.search-hit').forEach((m) => {
+    root.querySelectorAll('mark.search-hit').forEach((m) => {
       const r = m.getBoundingClientRect();
       if (!r.height) return;
-      const y = Math.round((r.top - cTop) * mmScale);
+      const y = Math.round((r.top - cTop) * s);
       if (seen.has(y)) return; seen.add(y);
       const d = document.createElement('div');
       d.className = 'mm-mark';
@@ -1713,7 +1738,7 @@
     sc.scrollTop = Math.max(0, Math.min(sc.scrollHeight - sc.clientHeight, target));
   }
   minimap.addEventListener('mousedown', (e) => {
-    if (!minimapOn() || editMode || mmDragging) return;
+    if (!minimapOn() || mmDragging) return;
     e.preventDefault();
     // primer click antes de que el build diferido haya corrido: construye ya (evita ÷0)
     if (!mmScale) { clearTimeout(mmBuildTimer); buildMinimap(); }
@@ -1730,7 +1755,7 @@
     document.body.classList.toggle('minimap-on', on);
     btnMinimap.classList.toggle('active', on);
     localStorage.setItem('mdlive-minimap', on ? '1' : '0');
-    if (on && !editMode) requestAnimationFrame(buildMinimap);
+    if (on) requestAnimationFrame(buildMinimap);
     else if (!on) { minimapCanvas.innerHTML = ''; minimapMarks.innerHTML = ''; }
     renderGutterMarks();   // el gutter solo aparece con el minimapa apagado
   }

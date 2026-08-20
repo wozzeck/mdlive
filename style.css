@@ -416,8 +416,8 @@ body.help-open #help-overlay { display: flex; align-items: center; justify-conte
 :root { --minimap-w: 170px; --mm-sbw: 0px; }
 #minimap { display: none; }
 /* solo en modo lectura; reserva su ancho a la derecha (no tapa el contenido) */
-body.minimap-on:not(.edit-mode) { padding-right: var(--minimap-w); }
-body.minimap-on:not(.edit-mode) #minimap {
+body.minimap-on { padding-right: var(--minimap-w); }
+body.minimap-on #minimap {
   display: block; position: fixed; top: 0; right: 0; bottom: 0;
   width: var(--minimap-w); overflow: hidden; z-index: 40;
   background: var(--alt-bg); border-left: 1px solid var(--border);
@@ -437,7 +437,7 @@ body.minimap-on:not(.edit-mode) #minimap {
   box-sizing: border-box;
   background: rgba(9,105,218,.14); border: 1px solid rgba(9,105,218,.55);
 }
-body.minimap-on:not(.edit-mode) #minimap:hover #minimap-viewport { background: rgba(9,105,218,.22); }
+body.minimap-on #minimap:hover #minimap-viewport { background: rgba(9,105,218,.22); }
 /* marcas de las coincidencias de búsqueda sobre el minimapa (regla tipo Sublime) */
 #minimap-marks { position: absolute; top: 0; left: 0; right: 0; z-index: 2; pointer-events: none; transform-origin: top left; will-change: transform; }
 #minimap-marks .mm-mark { position: absolute; left: 0; right: 0; height: 2px; background: #f97316; box-shadow: 0 0 0 .5px rgba(249,115,22,.45); }
@@ -445,11 +445,11 @@ body.minimap-on:not(.edit-mode) #minimap:hover #minimap-viewport { background: r
 #minimap-canvas mark.search-hit { background: #fde047; color: inherit; }
 /* tirador de redimensionado en el borde izquierdo del minimapa */
 #minimap-resizer { display: none; }
-body.minimap-on:not(.edit-mode) #minimap-resizer {
+body.minimap-on #minimap-resizer {
   display: block; position: fixed; top: 0; bottom: 0; right: var(--minimap-w);
   width: 7px; z-index: 46; cursor: col-resize;
 }
-body.minimap-on:not(.edit-mode) #minimap-resizer:hover { background: linear-gradient(to right, transparent, rgba(9,105,218,.28)); }
+body.minimap-on #minimap-resizer:hover { background: linear-gradient(to right, transparent, rgba(9,105,218,.28)); }
 /* === Gutter: regla de coincidencias cuando el minimapa está apagado ======= */
 #minimap-gutter { display: none; }
 body:not(.minimap-on):not(.edit-mode) #minimap-gutter.show {
@@ -460,5 +460,5 @@ body:not(.minimap-on):not(.edit-mode) #minimap-gutter.show {
 #minimap-gutter .gm { position: absolute; left: 1px; right: 1px; height: 2px; background: #f97316; box-shadow: 0 0 0 .5px rgba(249,115,22,.45); }
 /* los toggles quedan FIJOS sobre el minimapa (z-index 50 > 40), no se desplazan;
    solo la chincheta (barra de contenido) se acorta para no solaparse */
-body.minimap-on:not(.edit-mode) #pin-bar { right: var(--minimap-w); }
+body.minimap-on #pin-bar { right: var(--minimap-w); }
 #btn-minimap.active { background: var(--link); color: #fff; border-color: var(--link); }
