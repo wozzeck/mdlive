@@ -609,21 +609,60 @@
     ];
   }
 
-  function enterEdit() {
+  // Los dos modos comparten el scroll de la pagina y el editor replica el espaciado del
+  // visor, asi que para no perder el sitio al cambiar de modo basta anclar a un encabezado:
+  // se apunta el ultimo que queda por encima del borde superior y a que distancia estaba, y
+  // luego se recoloca ahi. (Guardar solo scrollTop no vale: el bloque del cursor pasa a
+  // fuente -- y al entrar en edicion CM lleva el cursor, y el scroll, al principio.)
+  function scrollAnchor() {
+    const sc = document.scrollingElement;
+    const ref = pinBarH() + 4;
+    let best = -1, bestTop = 0;
+    for (let i = 0; i < headings.length; i++) {
+      const t = headingTop(i);
+      if (t == null) continue;      // encabezado tapado por un <details> cerrado
+      if (t > ref) break;
+      best = i; bestTop = t;
+    }
+    return { top: sc.scrollTop, i: best, off: bestTop };
+  }
+  function restoreScrollAnchor(a) {
+    if (!a) return;
+    const sc = document.scrollingElement;
+    sc.scrollTop = a.top;
+    if (a.i < 0) return;   // no habia ningun encabezado por encima: con scrollTop basta
+    // se repite un par de fotogramas: CM necesita medir, y el visor carga imagenes/mermaid
+    const settle = (n) => {
+      const t = headingTop(a.i);
+      if (t != null) sc.scrollTop += t - a.off;
+      if (n) requestAnimationFrame(() => settle(n - 1));
+    };
+    requestAnimationFrame(() => settle(2));
+  }
+  function enterEdit(anchor) {
     content.style.display = 'none';
     editorHost.style.display = '';
     editorHost.innerHTML = '';
     cmView = new window.CM.view.EditorView({ doc: docSource, parent: editorHost, extensions: buildExtensions(window.CM) });
     cmView.scrollDOM.addEventListener('scroll', onAnyScroll, { passive: true });
+    // el cursor arranca en el encabezado que se estaba mirando: si se queda en el inicio del
+    // documento, el bloque que pasa a fuente es el primero (y el foco se lleva el scroll)
+    if (anchor && anchor.i >= 0 && headings[anchor.i]) {
+      const doc = cmView.state.doc;
+      const pos = doc.line(Math.min(doc.lines, headings[anchor.i].line + 1)).from;
+      cmView.dispatch({ selection: { anchor: pos } });
+    }
     cmView.focus();
     if (tocOpen()) buildToc(); else if (pinOn()) refreshHeadings();
     if (tocOpen() || pinOn()) requestAnimationFrame(updateSpy);
+    restoreScrollAnchor(anchor);
   }
-  function exitEdit() {
+  function exitEdit(anchor) {
     if (cmView) { docSource = cmView.state.doc.toString(); lastFetched = docSource; saveNow(); cmView.destroy(); cmView = null; }
     editorHost.style.display = 'none';
     content.style.display = '';
     renderView();
+    restoreScrollAnchor(anchor);
   }
 
   // ---- guardado ----
@@ -637,10 +676,12 @@
   // ---- toggle ----
   function setEditMode(on) {
     if (on === editMode || !window.CM) return;
+    refreshHeadings();                    // el ancla usa headings[]: puede estar sin refrescar
+    const anchor = scrollAnchor();        // OJO: antes de cambiar editMode (headingTop lo mira)
     editMode = on;
     document.body.classList.toggle('edit-mode', on);
     btnEdit.classList.toggle('active', on);
-    if (on) enterEdit(); else exitEdit();
+    if (on) enterEdit(anchor); else exitEdit(anchor);
   }
   btnEdit.onclick = () => setEditMode(!editMode);
 
