@@ -7,6 +7,7 @@ Pensado para abrir un `.md` y verlo actualizarse al vuelo mientras lo editas con
 ## Características
 
 - **Live reload**: si el `.md` cambia en disco, la vista se refresca al instante (también recarga `style.css` e `index.html` en caliente).
+- **Título de la ventana**: `nombre.md - dd/mm/aaaa HH:MM - mdlive`, con la fecha de la última modificación del fichero; se actualiza al guardar desde el editor y cuando el `.md` cambia en disco.
 - **Edición WYSIWYG por bloques** (CodeMirror 6): todo el documento se ve renderizado salvo el bloque donde está el cursor, que se muestra como fuente y se resalta. Guarda directo al fichero.
 - **Índice/árbol del documento**: panel lateral con la jerarquía de encabezados, colapsable, redimensionable y con *scroll-spy* (resalta el apartado visible), tanto en visor como en editor.
 - **Minimapa** (`m`): miniatura a escala de todo el documento en la parte derecha (estilo Sublime Text), con un recuadro que marca la ventana visible y se mueve con el scroll; haz clic o arrastra sobre la miniatura para navegar. Ancho ajustable con un tirador en su borde izquierdo (se recuerda). Las coincidencias de la búsqueda se marcan sobre el minimapa; con el minimapa apagado, aparecen en una franja fina a la derecha (esta franja, solo en el visor). Funciona igual en el visor y en el editor.
