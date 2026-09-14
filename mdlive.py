@@ -186,7 +186,7 @@ class MdLive(Gtk.Window):
         super().__init__()
         self.md_path = pathlib.Path(md_path).resolve()
         self.set_default_size(1100, 900)
-        self.set_title(self.md_path.name + " - mdlive")
+        self._refresh_title()
 
         # icono de markdown (para barra de tareas / alt-tab)
         for name in ("icon.png", "icon.svg"):
@@ -251,6 +251,7 @@ class MdLive(Gtk.Window):
             self.md_path.write_text(text, encoding="utf-8")
             # marca el mtime como propio para que el watcher NO recargue encima
             self._mtimes["md"] = os.stat(self.md_path).st_mtime_ns
+            self._refresh_title()
         except OSError as e:
             print("mdlive: no se pudo guardar %s: %s" % (self.md_path, e), file=sys.stderr)
 
@@ -481,6 +482,17 @@ class MdLive(Gtk.Window):
                 except Exception:
                     pass
 
+    # ---- titulo: "nombre - fecha de modificacion - mdlive" --------------
+    def _refresh_title(self):
+        try:
+            when = time.strftime("%d/%m/%Y %H:%M", time.localtime(os.stat(self.md_path).st_mtime))
+        except OSError:
+            when = None  # el fichero puede haber desaparecido
+        name = self.md_path.name
+        title = "%s - %s - mdlive" % (name, when) if when else "%s - mdlive" % name
+        if title != self.get_title():
+            self.set_title(title)
+
     # ---- live reload ----------------------------------------------------
     def _poll(self):
         for key, p in (("md", self.md_path), ("css", APP_DIR / "style.css"), ("html", APP_DIR / "index.html")):
@@ -496,6 +508,8 @@ class MdLive(Gtk.Window):
                 else:
                     fn = "reloadMd" if key == "md" else "reloadCss"
                     self._js("window.__mdlive && window.__mdlive.%s()" % fn)
+                if key == "md":
+                    self._refresh_title()
         return True
 
     def _js(self, script):
