@@ -798,20 +798,38 @@
     return false;
   }
   // Tooltip propio para los títulos cortados con "…". El title nativo lo temporiza el
-  // sistema (~1 s en WebKitGTK, no es configurable) y aquí interesa instantáneo. Va en
-  // <body> y position:fixed porque el panel recorta (overflow) y el texto completo, por
-  // definición, no cabe dentro.
-  let tocTip = null;
+  // sistema (~1 s en WebKitGTK, no es configurable) y aquí interesa instantáneo. No es una
+  // burbuja en otro sitio: se pinta ENCIMA de la propia fila, con su misma fuente, tamaño y
+  // posición, de forma que la línea parece desplegarse hacia la derecha y solo aparece lo
+  // que no cabía. Va en <body> y position:fixed porque el panel recorta (overflow).
+  let tocTip = null, tocTipText = null;
+  // lo que se copia del enlace para que el texto caiga justo sobre el cortado
+  const TIP_COPY = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing',
+                    'lineHeight', 'color', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'];
   function hideTocTip() { if (tocTip) tocTip.classList.remove('show'); }
   function showTocTip(a) {
     if (a.scrollWidth <= a.clientWidth + 1) return hideTocTip();   // cabe entero: no hace falta
-    if (!tocTip) { tocTip = document.createElement('div'); tocTip.className = 'mdlive-tip'; document.body.appendChild(tocTip); }
-    tocTip.textContent = a.textContent;
+    if (!tocTip) {
+      tocTip = document.createElement('div'); tocTip.className = 'mdlive-tip';
+      tocTipText = document.createElement('span');
+      tocTip.appendChild(tocTipText); document.body.appendChild(tocTip);
+    }
+    tocTipText.textContent = a.textContent;
+    const cs = getComputedStyle(a);
+    for (const p of TIP_COPY) tocTipText.style[p] = cs[p];
+    // el tinte de la fila (hover / activa) encima del fondo opaco: asi no se ve la costura
+    tocTipText.style.background = getComputedStyle(a.parentElement).backgroundColor;
     tocTip.classList.add('show');
-    // se ancla bajo la fila (sin taparla) y se mete dentro de la ventana
-    const r = a.getBoundingClientRect(), t = tocTip.getBoundingClientRect();
-    tocTip.style.left = Math.max(4, Math.min(r.left - 4, window.innerWidth - t.width - 4)) + 'px';
-    tocTip.style.top = Math.max(4, Math.min(r.bottom + 2, window.innerHeight - t.height - 4)) + 'px';
+    // pegada al enlace: se descuenta el borde propio para que el texto no se mueva ni 1px
+    const r = a.getBoundingClientRect(), tcs = getComputedStyle(tocTip);
+    const left = r.left - (parseFloat(tcs.borderLeftWidth) || 0);
+    tocTip.style.left = left + 'px';
+    tocTip.style.minWidth = r.width + 'px';
+    tocTip.style.maxWidth = Math.max(r.width, window.innerWidth - left - 6) + 'px';
+    // a la altura de la fila; solo se sube si el título es tan largo que parte y se sale
+    const top = r.top - (parseFloat(tcs.borderTopWidth) || 0);
+    const h = tocTip.getBoundingClientRect().height;
+    tocTip.style.top = Math.max(4, Math.min(top, window.innerHeight - h - 4)) + 'px';
   }
   tocList.addEventListener('mouseover', (e) => {
     const a = e.target.closest && e.target.closest('a');
