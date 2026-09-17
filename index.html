@@ -93,6 +93,10 @@
           <tr><td><kbd>Ctrl</kbd>+<kbd>J</kbd></td><td>Unir las líneas del bloque: quita los saltos de línea que al leer no se ven (también con el botón de la esquina del bloque)</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd></td><td>Lo mismo en todo el documento</td></tr>
           <tr><td>clic en celda</td><td>Tablas: edita esa celda en su sitio (su fuente); <kbd>Tab</kbd>/<kbd>Shift</kbd>+<kbd>Tab</kbd> celda siguiente/anterior, <kbd>Intro</kbd>/<kbd>Shift</kbd>+<kbd>Intro</kbd> abajo/arriba, <kbd>Esc</kbd> cancela. <kbd>Ctrl</kbd>+clic: la tabla entera en fuente</td></tr>
+          <tr><td>clic derecho en celda</td><td>Tablas: menú con las operaciones (insertar, mover y eliminar filas y columnas, alinear la columna, realinear los anchos). Mientras se edita una celda, las más usadas asoman en una mini-barra sobre la tabla</td></tr>
+          <tr><td><kbd>Tab</kbd> en la última celda</td><td>Tablas: añade una fila</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Intro</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Intro</kbd></td><td>Tablas (en la celda): insertar fila debajo / encima</td></tr>
+          <tr><td><kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>, <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd></td><td>Tablas (en la celda): mover la fila / la columna</td></tr>
         </table>
       </section>
     </div>
@@ -378,6 +382,7 @@
           const cell = e.target.closest && e.target.closest('td, th');
           if (cell && !e.ctrlKey && !e.metaKey) {
             e.preventDefault(); e.stopPropagation();
+            if (e.button !== 0) return;   // boton derecho: el menu de la tabla (contextmenu, abajo); el foco no se mueve
             const { r, c } = cellPos(cell);
             if (cellEdit) endCellEdit(true, { from: this.from, r, c }); else startCellEdit(view, this.from, cell);
             return;
@@ -385,6 +390,15 @@
           e.preventDefault();
           view.dispatch({ selection: { anchor: this.from } });
           view.focus();
+        });
+        // clic derecho en una celda: menu con las operaciones de la tabla (filas, columnas,
+        // alineacion). El menu nativo lo suprime mdlive.py, pero el evento del DOM si llega.
+        div.addEventListener('contextmenu', (e) => {
+          const cell = e.target.closest && e.target.closest('td, th');
+          if (!cell) return;
+          e.preventDefault(); e.stopPropagation();
+          const { r, c } = cellPos(cell);
+          showTableMenu(view, this.from, r, c, e.clientX, e.clientY);
         });
         observeSize(view, div);
         return div;
@@ -689,6 +703,83 @@
     return t ? { line: doc.lineAt(blk.from).number + t.map[0], rows: t.map[1] - t.map[0] - 1 } : null;
   }
   // @test-end
+  // @test-begin tableops
+  // ---- operaciones sobre la tabla como datos --------------------------------
+  // La tabla GFM se maneja como filas de celdas (su fuente tal cual, con los `\|` escapados) y
+  // la alineacion de cada columna: 'l' | 'c' | 'r' | null (sin dos puntos: izquierda por defecto).
+  // La fila 1 de la fuente es la de alineacion; markdown-it exige que case con la cabecera.
+  function parseTable(text) {
+    const lines = text.split('\n');
+    const cellsOf = (ln) => tableCells(ln).map((s) => ln.slice(s.cFrom, s.cTo));
+    const rows = [cellsOf(lines[0])];
+    const align = cellsOf(lines[1] || '').map((s) => {
+      const l = s[0] === ':', r = s[s.length - 1] === ':';
+      return l && r ? 'c' : r ? 'r' : l ? 'l' : null;
+    });
+    for (let i = 2; i < lines.length; i++) rows.push(cellsOf(lines[i]));
+    align.length = rows[0].length;
+    for (let c = 0; c < align.length; c++) if (align[c] === undefined) align[c] = null;
+    return { rows, align };
+  }
+  // ancho en columnas de texto monoespaciado (ideogramas, kana, hangul, anchos completos y
+  // emoji ocupan dos): para que los pipes queden alineados tambien con esos textos
+  const WIDE_RE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦\u{1F300}-\u{1FAFF}]/u;
+  function strWidth(s) { let w = 0; for (const ch of s) w += WIDE_RE.test(ch) ? 2 : 1; return w; }
+  // Texto de la tabla con los pipes alineados: cada columna al ancho de su celda mas larga
+  // (minimo 3, el de `---`) y las celdas rellenas segun la alineacion de la columna. Las filas
+  // cortas se completan; las que traen celdas de mas las conservan al final (GFM no las pinta,
+  // pero no se pierde nada).
+  function formatTable(tb) {
+    const { rows, align } = tb, n = rows[0].length, w = [];
+    for (let c = 0; c < n; c++) w.push(Math.max(3, ...rows.map((r) => strWidth(r[c] || ''))));
+    const pad = (s, c) => {
+      const k = w[c] - strWidth(s), a = align[c];
+      if (k <= 0) return s;
+      if (a === 'r') return ' '.repeat(k) + s;
+      if (a === 'c') return ' '.repeat(k >> 1) + s + ' '.repeat(k - (k >> 1));
+      return s + ' '.repeat(k);
+    };
+    const line = (cells) => {
+      const out = [];
+      for (let c = 0; c < Math.max(n, cells.length); c++) out.push(c < n ? pad(cells[c] || '', c) : cells[c]);
+      return '| ' + out.join(' | ') + ' |';
+    };
+    const sep = align.map((a, c) => {
+      const d = '-'.repeat(w[c] - (a === 'c' ? 2 : a ? 1 : 0));
+      return a === 'c' ? ':' + d + ':' : a === 'r' ? d + ':' : a === 'l' ? ':' + d : d;
+    });
+    return [line(rows[0]), '| ' + sep.join(' | ') + ' |', ...rows.slice(1).map(line)].join('\n');
+  }
+  // Las operaciones mutan la tabla y devuelven la celda (r, c) en la que seguir, o null si no
+  // proceden (la cabecera ni se borra ni se mueve; nada se mueve fuera de la tabla; la ultima
+  // columna no se borra). r cuenta la cabecera como fila 0 (como rowIndex en el DOM).
+  const swap = (a, i, j) => { const t = a[i]; a[i] = a[j]; a[j] = t; };
+  const fillTo = (row, n) => { while (row.length < n) row.push(''); return row; };
+  const TABLE_OPS = {
+    rowAbove(tb, r, c) { if (r === 0) return null; tb.rows.splice(r, 0, []); return { r, c }; },
+    rowBelow(tb, r, c) { tb.rows.splice(r + 1, 0, []); return { r: r + 1, c }; },
+    rowUp(tb, r, c) { if (r < 2) return null; swap(tb.rows, r, r - 1); return { r: r - 1, c }; },
+    rowDown(tb, r, c) { if (r === 0 || r + 1 >= tb.rows.length) return null; swap(tb.rows, r, r + 1); return { r: r + 1, c }; },
+    rowDelete(tb, r, c) { if (r === 0) return null; tb.rows.splice(r, 1); return { r: Math.min(r, tb.rows.length - 1), c }; },
+    colLeft(tb, r, c) { tb.rows.forEach((row) => fillTo(row, c).splice(c, 0, '')); tb.align.splice(c, 0, null); return { r, c }; },
+    colRight(tb, r, c) { tb.rows.forEach((row) => fillTo(row, c + 1).splice(c + 1, 0, '')); tb.align.splice(c + 1, 0, null); return { r, c: c + 1 }; },
+    colPrev(tb, r, c) { if (c === 0) return null; tb.rows.forEach((row) => swap(fillTo(row, c + 1), c, c - 1)); swap(tb.align, c, c - 1); return { r, c: c - 1 }; },
+    colNext(tb, r, c) { if (c + 1 >= tb.rows[0].length) return null; tb.rows.forEach((row) => swap(fillTo(row, c + 2), c, c + 1)); swap(tb.align, c, c + 1); return { r, c: c + 1 }; },
+    colDelete(tb, r, c) { if (tb.rows[0].length < 2) return null; tb.rows.forEach((row) => { if (c < row.length) row.splice(c, 1); }); tb.align.splice(c, 1); return { r, c: Math.min(c, tb.rows[0].length - 1) }; },
+    alignLeft(tb, r, c) { tb.align[c] = 'l'; return { r, c }; },
+    alignCenter(tb, r, c) { tb.align[c] = 'c'; return { r, c }; },
+    alignRight(tb, r, c) { tb.align[c] = 'r'; return { r, c }; },
+    format(tb, r, c) { return { r, c }; },
+  };
+  // Aplica la operacion `op` (TABLE_OPS) al texto de la tabla sobre la celda (r, c). Devuelve
+  // { text, r, c } (la tabla re-alineada y la celda destino) o null si la operacion no procede.
+  function tableOp(text, op, r, c) {
+    const tb = parseTable(text);
+    if (!TABLE_OPS[op] || r < 0 || r >= tb.rows.length || c < 0 || c >= tb.rows[0].length) return null;
+    const at = TABLE_OPS[op](tb, r, c);
+    return at ? { text: formatTable(tb), r: at.r, c: at.c } : null;
+  }
+  // @test-end
   // Edicion de UNA celda en el bloque renderizado. Con un clic se abre sobre la celda un
   // cajon contenteditable (cm-cell-editor) con la FUENTE de la celda (`**negrita**`, no la
   // negrita: editar HTML renderizado y volver a markdown no es fiable); el resto de la tabla
@@ -698,7 +789,8 @@
   // al editor). Al salir se confirma con un dispatch que sustituye solo esa celda en su
   // linea; el widget se re-crea y, si toca, se sigue en la celda destino (localizada en el
   // widget nuevo por data-from). Tab / Shift+Tab: siguiente / anterior; Intro / Shift+Intro:
-  // abajo / arriba; Esc cancela; clic fuera confirma. Ctrl+clic abre la tabla en fuente.
+  // abajo / arriba; Esc cancela; clic fuera confirma. Ctrl+clic abre la tabla en fuente. Las
+  // operaciones de la tabla (filas, columnas, alineacion) van mas abajo: mini-barra y menu.
   let cellEdit = null;   // { view, from, r, c, cell, text, tStart, rows, cols }
   let cellBox = null, cellView = null, cellExts = null;   // el cajon y su CodeMirror (uno, reutilizado)
   const cellPos = (cell) => ({ r: cell.parentElement.rowIndex, c: cell.cellIndex });   // rowIndex cuenta thead + tbody
@@ -725,6 +817,13 @@
         { key: 'Shift-Tab', run: () => { moveCell(0, -1); return true; } },
         { key: 'Enter', run: () => { moveCell(1, 0); return true; } },
         { key: 'Shift-Enter', run: () => { moveCell(-1, 0); return true; } },
+        // operaciones de la tabla desde el cajon (las mismas que la mini-barra y el menu)
+        { key: 'Mod-Enter', run: () => { cellOp('rowBelow'); return true; } },
+        { key: 'Mod-Shift-Enter', run: () => { cellOp('rowAbove'); return true; } },
+        { key: 'Alt-ArrowUp', run: () => { cellOp('rowUp'); return true; } },
+        { key: 'Alt-ArrowDown', run: () => { cellOp('rowDown'); return true; } },
+        { key: 'Alt-ArrowLeft', run: () => { cellOp('colPrev'); return true; } },
+        { key: 'Alt-ArrowRight', run: () => { cellOp('colNext'); return true; } },
       ])),
       keymap.of([...defaultKeymap, ...historyKeymap]),
       CM.markdown(),
@@ -737,6 +836,15 @@
     cellBox.addEventListener('keydown', (e) => { if (e.key === 'Escape' || e.key === 'Tab' || e.key === 'Enter') e.stopPropagation(); });
     // el foco se va fuera del cajon (clic en otro sitio, Ctrl+F...): confirmar
     cellBox.addEventListener('focusout', (e) => { if (cellEdit && !cellBox.contains(e.relatedTarget)) endCellEdit(true); });
+    // mousedown en el relleno del cajon (fuera del texto) o con el boton derecho: que el foco no
+    // se mueva (se iria a body y el focusout confirmaria y cerraria el cajon antes del contextmenu)
+    cellBox.addEventListener('mousedown', (e) => { if (e.button !== 0 || !cellView.contentDOM.contains(e.target)) e.preventDefault(); });
+    // clic derecho en el cajon: el menu de la tabla para esta celda
+    cellBox.addEventListener('contextmenu', (e) => {
+      if (!cellEdit) return;
+      e.preventDefault(); e.stopPropagation();
+      showTableMenu(cellEdit.view, cellEdit.from, cellEdit.r, cellEdit.c, e.clientX, e.clientY);
+    });
     return cellBox;
   }
   // el cajon se pone justo encima de la celda, con su relleno y su tipografia
@@ -774,6 +882,7 @@
     // se anota DESPUES de enfocar: un focusout intermedio no debe confirmar nada
     cellEdit = { view, from, r, c, cell, text, tStart: tb.line, rows: tb.rows,
                  cols: tableCells(st.doc.line(tb.line).text).length };
+    placeTableTools(cellEdit);
   }
   // confirma (o cancela) la celda abierta; con next = {from, r, c} sigue editando esa otra
   function endCellEdit(commit, next) {
@@ -789,6 +898,7 @@
       }
     }
     if (next) { const nc = cellAt(widgetDom(next.from), next.r, next.c); if (nc) { startCellEdit(view, next.from, nc); return; } }
+    hideTableTools();
     cellBox.remove();
     view.focus();
   }
@@ -797,7 +907,204 @@
     let { r, c } = ce;
     if (dc) { c += dc; if (c >= ce.cols) { c = 0; r++; } else if (c < 0) { c = ce.cols - 1; r--; } }
     r += dr;
+    // Tab en la ultima celda: se anade una fila y se sigue en su primera celda
+    if (dc > 0 && r >= ce.rows) { applyTableOp(ce.view, ce.from, ce.rows - 1, ce.c, 'rowBelow', { r: ce.rows, c: 0 }); return; }
     endCellEdit(true, (r >= 0 && r < ce.rows) ? { from: ce.from, r, c } : null);   // fuera de la tabla: confirmar y salir
+  }
+  // ---- operaciones de tabla: mini-barra, menu contextual y atajos ---------------
+  // Las operaciones (TABLE_OPS) se aplican con applyTableOp: confirma la celda abierta,
+  // sustituye el texto de la tabla entera (un solo paso de deshacer: isolateHistory) y, si se
+  // estaba editando, sigue en la celda destino del widget nuevo. Se llega a ellas desde la
+  // mini-barra que asoma sobre la tabla mientras se edita una celda, desde el menu del clic
+  // derecho en cualquier celda (el nativo lo suprime mdlive.py, pero el evento contextmenu
+  // del DOM llega igual) y con atajos en el cajon.
+  const TABLE_ACTIONS = [
+    { op: 'rowAbove', label: 'Insertar fila encima', icon: 'rowAbove', key: 'Ctrl+Shift+Intro' },
+    { op: 'rowBelow', label: 'Insertar fila debajo', icon: 'rowBelow', key: 'Ctrl+Intro' },
+    { op: 'rowUp', label: 'Subir fila', icon: 'up', key: 'Alt+↑' },
+    { op: 'rowDown', label: 'Bajar fila', icon: 'down', key: 'Alt+↓' },
+    { op: 'rowDelete', label: 'Eliminar fila', icon: 'trash' },
+    { sep: true },
+    { op: 'colLeft', label: 'Insertar columna a la izquierda', icon: 'colLeft' },
+    { op: 'colRight', label: 'Insertar columna a la derecha', icon: 'colRight' },
+    { op: 'colPrev', label: 'Mover columna a la izquierda', icon: 'left', key: 'Alt+←' },
+    { op: 'colNext', label: 'Mover columna a la derecha', icon: 'right', key: 'Alt+→' },
+    { op: 'colDelete', label: 'Eliminar columna', icon: 'trash' },
+    { sep: true },
+    { op: 'alignLeft', label: 'Alinear columna a la izquierda', icon: 'alignLeft', align: 'l' },
+    { op: 'alignCenter', label: 'Alinear columna al centro', icon: 'alignCenter', align: 'c' },
+    { op: 'alignRight', label: 'Alinear columna a la derecha', icon: 'alignRight', align: 'r' },
+    { sep: true },
+    { op: 'format', label: 'Realinear los anchos de la tabla', icon: 'widths' },
+    { op: 'source', label: 'Tabla entera en fuente', icon: 'code', key: 'Ctrl+clic' },
+  ];
+  // la mini-barra lleva las mas usadas; el resto, en el menu (boton "..." o clic derecho)
+  const TABLE_STRIP = [
+    { op: 'rowBelow', text: 'fila', icon: 'plus', title: 'Insertar fila debajo (Ctrl+Intro)' },
+    { op: 'colRight', text: 'columna', icon: 'plus', title: 'Insertar columna a la derecha' },
+    { op: 'rowDelete', text: 'fila', icon: 'trash', title: 'Eliminar fila' },
+    { op: 'colDelete', text: 'columna', icon: 'trash', title: 'Eliminar columna' },
+    { sep: true },
+    { op: 'alignLeft', icon: 'alignLeft', title: 'Alinear columna a la izquierda', align: 'l' },
+    { op: 'alignCenter', icon: 'alignCenter', title: 'Alinear columna al centro', align: 'c' },
+    { op: 'alignRight', icon: 'alignRight', title: 'Alinear columna a la derecha', align: 'r' },
+    { sep: true },
+    { op: 'format', text: 'anchos', icon: 'widths', title: 'Realinear los anchos de la tabla' },
+    { op: 'more', icon: 'more', title: 'Todas las operaciones (también con clic derecho en una celda)' },
+  ];
+  const TICON = {   // trazos estilo lucide, 24x24
+    plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+    trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/>',
+    up: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+    down: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
+    left: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+    right: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+    alignLeft: '<path d="M21 6H3"/><path d="M15 12H3"/><path d="M17 18H3"/>',
+    alignCenter: '<path d="M21 6H3"/><path d="M17 12H7"/><path d="M19 18H5"/>',
+    alignRight: '<path d="M21 6H3"/><path d="M21 12H9"/><path d="M21 18H7"/>',
+    widths: '<path d="m18 8 4 4-4 4"/><path d="M2 12h20"/><path d="m6 8-4 4 4 4"/>',
+    code: '<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>',
+    more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+    // insertar fila / columna: dos celdas y el signo mas donde va la nueva
+    rowAbove: '<rect x="3" y="12" width="18" height="9" rx="2"/><path d="M3 16.5h18"/><path d="M12 3v6"/><path d="M9 6h6"/>',
+    rowBelow: '<rect x="3" y="3" width="18" height="9" rx="2"/><path d="M3 7.5h18"/><path d="M12 15v6"/><path d="M9 18h6"/>',
+    colLeft: '<rect x="12" y="3" width="9" height="18" rx="2"/><path d="M16.5 3v18"/><path d="M3 12h6"/><path d="M6 9v6"/>',
+    colRight: '<rect x="3" y="3" width="9" height="18" rx="2"/><path d="M7.5 3v18"/><path d="M15 12h6"/><path d="M18 9v6"/>',
+  };
+  const ticon = (n) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + TICON[n] + '</svg>';
+  // texto de la tabla de la unidad `from` y su rango en el documento (null si no es tabla editable)
+  function tableText(view, from) {
+    const st = view.state, blk = blocksOf(st).find((b) => b.from === from);
+    const tb = blk && tableInfo(st.doc, blk);
+    if (!tb) return null;
+    const a = st.doc.line(tb.line), z = st.doc.line(tb.line + tb.rows);
+    return { from: a.from, to: z.to, text: st.doc.sliceString(a.from, z.to) };
+  }
+  function applyTableOp(view, from, r, c, op, dest) {
+    const editing = !!cellEdit;
+    if (cellEdit) endCellEdit(true);   // confirma (y cierra) la celda abierta, sea de esta tabla o de otra
+    hideTableMenu();
+    if (op === 'source') { view.dispatch({ selection: { anchor: from } }); view.focus(); return true; }
+    const t = tableText(view, from), res = t && tableOp(t.text, op, r, c);
+    if (!res) return false;
+    view.dispatch({ changes: { from: t.from, to: t.to, insert: res.text }, annotations: window.CM.commands.isolateHistory.of('full') });
+    // el widget ya esta re-creado: si se estaba editando, se sigue en la celda destino
+    const to = dest || res, cell = editing && cellAt(widgetDom(from), to.r, to.c);
+    if (cell) startCellEdit(view, from, cell); else view.focus();
+    return true;
+  }
+  const cellOp = (op) => { const ce = cellEdit; if (ce) applyTableOp(ce.view, ce.from, ce.r, ce.c, op); };
+  // -- mini-barra: asoma justo encima de la tabla (o debajo, si arriba no hay sitio en
+  // pantalla), pegada a su borde izquierdo, mientras hay una celda abierta
+  let tableTools = null;
+  function tableToolsEl() {
+    if (tableTools) return tableTools;
+    tableTools = document.createElement('div');
+    tableTools.className = 'cm-table-tools';
+    for (const it of TABLE_STRIP) {
+      if (it.sep) { const s = document.createElement('span'); s.className = 'sep'; tableTools.appendChild(s); continue; }
+      const b = document.createElement('button');
+      b.type = 'button'; b.dataset.op = it.op; b.title = it.title;
+      b.innerHTML = ticon(it.icon) + (it.text ? '<span>' + it.text + '</span>' : '');
+      tableTools.appendChild(b);
+    }
+    // mousedown (no click) con preventDefault: el foco se queda en el cajon; un focusout lo
+    // confirmaria y cerraria antes de aplicar la operacion
+    tableTools.addEventListener('mousedown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const b = e.target.closest('button'), ce = cellEdit;
+      if (!b || b.disabled || !ce || e.button !== 0) return;
+      if (b.dataset.op === 'more') { const r = b.getBoundingClientRect(); showTableMenu(ce.view, ce.from, ce.r, ce.c, r.left, r.bottom + 4); return; }
+      applyTableOp(ce.view, ce.from, ce.r, ce.c, b.dataset.op);
+    });
+    tableTools.addEventListener('contextmenu', (e) => e.preventDefault());
+    return tableTools;
+  }
+  function placeTableTools(ce) {
+    const el = tableToolsEl();
+    if (!el.parentNode) document.body.appendChild(el);
+    el.style.display = '';
+    const t = tableText(ce.view, ce.from), al = t ? (parseTable(t.text).align[ce.c] || 'l') : 'l';
+    for (const b of el.querySelectorAll('button')) {
+      const it = TABLE_STRIP.find((s) => s.op === b.dataset.op);
+      b.disabled = b.dataset.op !== 'more' && !(t && tableOp(t.text, b.dataset.op, ce.r, ce.c));
+      if (it.align) b.setAttribute('aria-pressed', String(it.align === al));
+    }
+    const r = ce.cell.closest('table').getBoundingClientRect(), h = el.offsetHeight;
+    const top = (r.top - h - 6 >= pinBarH() + 2) ? r.top - h - 6 : r.bottom + 6;
+    el.style.left = (r.left + window.scrollX) + 'px';
+    el.style.top = (top + window.scrollY) + 'px';
+  }
+  function hideTableTools() { if (tableTools) tableTools.style.display = 'none'; }
+  // -- menu contextual propio (clic derecho en una celda o en el cajon, boton "..." de la barra)
+  let tableMenu = null, menuCtx = null;   // menuCtx = { view, from, r, c } mientras esta abierto
+  function tableMenuEl() {
+    if (tableMenu) return tableMenu;
+    tableMenu = document.createElement('div');
+    tableMenu.className = 'cm-ctxmenu'; tableMenu.setAttribute('role', 'menu');
+    for (const it of TABLE_ACTIONS) {
+      if (it.sep) { const s = document.createElement('div'); s.className = 'sep'; tableMenu.appendChild(s); continue; }
+      const d = document.createElement('div');
+      d.className = 'item'; d.dataset.op = it.op; d.setAttribute('role', 'menuitem');
+      d.innerHTML = ticon(it.icon) + '<span class="lbl">' + it.label + '</span>' + (it.key ? '<span class="k">' + it.key + '</span>' : '');
+      tableMenu.appendChild(d);
+    }
+    tableMenu.addEventListener('mousedown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const d = e.target.closest('.item');
+      if (d && !d.classList.contains('off') && e.button === 0) runMenuItem(d.dataset.op);
+    });
+    tableMenu.addEventListener('mousemove', (e) => { const d = e.target.closest('.item'); if (d && !d.classList.contains('off')) selectMenuItem(d); });
+    tableMenu.addEventListener('contextmenu', (e) => e.preventDefault());
+    return tableMenu;
+  }
+  function selectMenuItem(d) { for (const x of tableMenu.querySelectorAll('.item.sel')) x.classList.remove('sel'); if (d) d.classList.add('sel'); }
+  function runMenuItem(op) { const m = menuCtx; hideTableMenu(); if (m) applyTableOp(m.view, m.from, m.r, m.c, op); }
+  function showTableMenu(view, from, r, c, x, y) {
+    const t = tableText(view, from);
+    if (!t) return false;
+    const al = parseTable(t.text).align[c] || 'l', el = tableMenuEl();
+    for (const d of el.querySelectorAll('.item')) {
+      const it = TABLE_ACTIONS.find((a) => a.op === d.dataset.op);
+      d.classList.toggle('off', it.op !== 'source' && !tableOp(t.text, it.op, r, c));
+      d.classList.toggle('on', !!it.align && it.align === al);
+      d.classList.remove('sel');
+    }
+    if (!el.parentNode) document.body.appendChild(el);
+    if (!menuCtx) {
+      document.addEventListener('mousedown', onMenuDocDown, true);
+      document.addEventListener('keydown', onMenuKey, true);
+      document.addEventListener('scroll', hideTableMenu, { capture: true, passive: true });
+      window.addEventListener('blur', hideTableMenu);
+    }
+    menuCtx = { view, from, r, c };
+    el.style.display = 'block';
+    // dentro de la ventana: si no cabe hacia la derecha / abajo, se corre hacia el otro lado
+    el.style.left = Math.max(2, Math.min(x, window.innerWidth - el.offsetWidth - 2)) + 'px';
+    el.style.top = Math.max(2, Math.min(y, window.innerHeight - el.offsetHeight - 2)) + 'px';
+    return true;
+  }
+  function hideTableMenu() {
+    if (!menuCtx) return;
+    menuCtx = null;
+    tableMenu.style.display = 'none';
+    document.removeEventListener('mousedown', onMenuDocDown, true);
+    document.removeEventListener('keydown', onMenuKey, true);
+    document.removeEventListener('scroll', hideTableMenu, { capture: true });
+    window.removeEventListener('blur', hideTableMenu);
+  }
+  function onMenuDocDown(e) { if (!tableMenu.contains(e.target)) hideTableMenu(); }
+  // teclado con el menu abierto: flechas, Intro/espacio, Esc (solo cierra el menu, no el cajon
+  // ni la edicion: por eso se captura antes que nadie); cualquier otra tecla lo cierra y sigue
+  function onMenuKey(e) {
+    const items = [...tableMenu.querySelectorAll('.item:not(.off)')];
+    const i = items.findIndex((d) => d.classList.contains('sel'));
+    if (e.key === 'ArrowDown') selectMenuItem(items[(i + 1) % items.length]);
+    else if (e.key === 'ArrowUp') selectMenuItem(items[(i - 1 + items.length) % items.length]);
+    else if ((e.key === 'Enter' || e.key === ' ') && i >= 0) runMenuItem(items[i].dataset.op);
+    else if (e.key === 'Escape') hideTableMenu();
+    else { hideTableMenu(); return; }
+    e.preventDefault(); e.stopPropagation();
   }
   // ---- movimiento VERTICAL del cursor en el editor -------------------------
   // Con el live-preview, todo lo que no toca la selección son widgets de bloque. CM

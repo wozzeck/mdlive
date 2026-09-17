@@ -8,7 +8,7 @@ Pensado para abrir un `.md` y verlo actualizarse al vuelo mientras lo editas con
 
 - **Live reload**: si el `.md` cambia en disco, la vista se refresca al instante (también recarga `style.css` e `index.html` en caliente).
 - **Título de la ventana**: `nombre.md - dd/mm/aaaa HH:MM - mdlive`, con la fecha de la última modificación del fichero; se actualiza al guardar desde el editor y cuando el `.md` cambia en disco.
-- **Edición WYSIWYG por bloques** (CodeMirror 6): todo el documento se ve renderizado salvo el bloque donde está el cursor (en una lista, solo su ítem), que se muestra como fuente y se resalta. Guarda directo al fichero. Si el bloque tiene saltos de línea que al leer no se ven (texto partido a mano), un botón en su esquina —o `Ctrl`+`J`— los quita. En las tablas, un clic sobre una celda edita solo esa celda (su fuente) con el resto de la tabla renderizado; `Tab` e `Intro` saltan de celda.
+- **Edición WYSIWYG por bloques** (CodeMirror 6): todo el documento se ve renderizado salvo el bloque donde está el cursor (en una lista, solo su ítem), que se muestra como fuente y se resalta. Guarda directo al fichero. Si el bloque tiene saltos de línea que al leer no se ven (texto partido a mano), un botón en su esquina —o `Ctrl`+`J`— los quita. En las tablas, un clic sobre una celda edita solo esa celda (su fuente) con el resto de la tabla renderizado; `Tab` e `Intro` saltan de celda, y con el clic derecho (o la mini-barra que asoma sobre la tabla) se insertan, mueven y eliminan filas y columnas, se alinea la columna y se realinean los anchos de la fuente.
 - **Índice/árbol del documento**: panel lateral con la jerarquía de encabezados, colapsable, redimensionable y con *scroll-spy* (resalta el apartado visible), tanto en visor como en editor.
 - **Minimapa** (`m`): miniatura a escala de todo el documento en la parte derecha (estilo Sublime Text), con un recuadro que marca la ventana visible y se mueve con el scroll; haz clic o arrastra sobre la miniatura para navegar. Ancho ajustable con un tirador en su borde izquierdo (se recuerda). Las coincidencias de la búsqueda se marcan sobre el minimapa; con el minimapa apagado, aparecen en una franja fina a la derecha (esta franja, solo en el visor). Funciona igual en el visor y en el editor.
 - **Buscador** (`Ctrl`+`F`): comparte el panel lateral con el índice, resalta las coincidencias en visor y editor y las lista con su número de línea; `Intro` (o `Ctrl`+`N`/`Ctrl`+`P`) navega por todas las ocurrencias con un breve halo de localización.
@@ -72,6 +72,10 @@ sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1
 | `Ctrl`+`J` | Unir las líneas del bloque: quita los saltos de línea que al leer no se ven (también con el botón de la esquina del bloque) |
 | `Ctrl`+`Shift`+`J` | Lo mismo en todo el documento |
 | clic en una celda | Tablas: edita esa celda en su sitio (su fuente); `Tab`/`Shift`+`Tab` celda siguiente/anterior, `Intro`/`Shift`+`Intro` abajo/arriba, `Esc` cancela; `Ctrl`+clic abre la tabla entera en fuente |
+| clic derecho en una celda | Tablas: menú con las operaciones (insertar, mover y eliminar filas y columnas, alinear la columna, realinear los anchos de la fuente). Mientras se edita una celda, las más usadas asoman en una mini-barra sobre la tabla |
+| `Tab` en la última celda | Tablas: añade una fila |
+| `Ctrl`+`Intro` / `Ctrl`+`Shift`+`Intro` | Tablas (en la celda): insertar fila debajo / encima |
+| `Alt`+`↑`/`↓`, `Alt`+`←`/`→` | Tablas (en la celda): mover la fila / la columna |
 
 Cada atajo de formato actúa sobre la selección o, si no hay nada seleccionado, sobre la palabra bajo el cursor.
 
@@ -93,8 +97,8 @@ tests/run.sh          # toda la suite
 tests/run.sh unit     # solo los unitarios
 ```
 
-- **Unitarios** (`tests/unit/*.test.js`, node sin dependencias): las funciones puras del editor —unir líneas, troceado en unidades (listas ítem a ítem), celdas de tabla— van marcadas en `index.html` con `// @test-begin <nombre>` … `// @test-end`; el runner las extrae y las ejecuta con el markdown-it vendorizado.
-- **Integración** (`tests/gui/test_*.py`): lanza la aplicación real sobre una copia de `tests/fixtures/*.md`, aislada (`XDG_*` a un directorio temporal: recientes, instancias y `localStorage` propios), con teclado y ratón reales (`xdotool`), capturas (`import`) y consulta del DOM por el canal de pruebas de `mdlive.py` (`MDLIVE_TEST_DIR`, ficheros `cmd-*.js`/`res-*.json`). Necesita `DISPLAY`, `xdotool`, `imagemagick` y `python3-pil`. Cubre el título de la ventana, unir líneas, el tooltip del índice, la edición de celdas y la igualdad píxel a píxel visor/editor con listas.
+- **Unitarios** (`tests/unit/*.test.js`, node sin dependencias): las funciones puras del editor —unir líneas, troceado en unidades (listas ítem a ítem), celdas y operaciones de tabla— van marcadas en `index.html` con `// @test-begin <nombre>` … `// @test-end`; el runner las extrae y las ejecuta con el markdown-it vendorizado.
+- **Integración** (`tests/gui/test_*.py`): lanza la aplicación real sobre una copia de `tests/fixtures/*.md`, aislada (`XDG_*` a un directorio temporal: recientes, instancias y `localStorage` propios), con teclado y ratón reales (`xdotool`), capturas (`import`) y consulta del DOM por el canal de pruebas de `mdlive.py` (`MDLIVE_TEST_DIR`, ficheros `cmd-*.js`/`res-*.json`). Necesita `DISPLAY`, `xdotool`, `imagemagick` y `python3-pil`. Cubre el título de la ventana, unir líneas, el tooltip del índice, la edición de celdas, las operaciones de tabla y la igualdad píxel a píxel visor/editor con listas.
 
 ## Estructura
 
