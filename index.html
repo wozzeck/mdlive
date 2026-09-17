@@ -828,6 +828,7 @@
       keymap.of([...defaultKeymap, ...historyKeymap]),
       CM.markdown(),
       syntaxHighlighting(defaultHighlightStyle),
+      codeMonoPlugin(CM),
       EditorView.theme({ '&': { backgroundColor: 'transparent' }, '&.cm-focused': { outline: 'none' },
                          '.cm-content': { fontFamily: 'var(--font-body)', caretColor: 'var(--fg)' } }),
     ];
@@ -1188,6 +1189,36 @@
     ]);
   }
 
+  // Codigo en FUENTE (bloque en edicion y cajon de celda) en la letra del codigo. El estilo por
+  // defecto de CodeMirror (defaultHighlightStyle) trae negrita, cursiva, enlaces... pero nada
+  // para la etiqueta `monospace`, y el bundle no expone `tags` para anadirlo; asi que se marca
+  // por el arbol sintactico: InlineCode entero (con sus acentos graves, como `**negrita**` se ve
+  // en negrita con sus asteriscos) y el texto de los bloques de codigo (CodeText). El CSS pone
+  // la letra y el fondo (.cm-mdcode / .cm-mdcodetext).
+  function codeMonoPlugin(CM) {
+    const { Decoration, ViewPlugin } = CM.view, { syntaxTree } = CM.language, { RangeSetBuilder } = CM.state;
+    const inline = Decoration.mark({ class: 'cm-mdcode' }), block = Decoration.mark({ class: 'cm-mdcodetext' });
+    function build(view) {
+      const found = [];
+      for (const { from, to } of view.visibleRanges) {
+        syntaxTree(view.state).iterate({ from, to, enter(n) {
+          if (n.name === 'InlineCode') found.push([n.from, n.to, inline]);
+          else if (n.name === 'CodeText') found.push([n.from, n.to, block]);
+        } });
+      }
+      // un nodo que cruce dos rangos visibles entra dos veces: ordenado y sin repetidos
+      found.sort((a, b) => a[0] - b[0]);
+      const b = new RangeSetBuilder();
+      let last = -1;
+      for (const [from, to, deco] of found) { if (from < last) continue; b.add(from, to, deco); last = to; }
+      return b.finish();
+    }
+    return ViewPlugin.fromClass(class {
+      constructor(view) { this.decorations = build(view); }
+      update(u) { if (u.docChanged || u.viewportChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) this.decorations = build(u.view); }
+    }, { decorations: (v) => v.decorations });
+  }
+
   function buildExtensions(CM) {
     const { EditorView, keymap, Decoration } = CM.view;
     const { StateField, StateEffect, RangeSetBuilder, Prec } = CM.state;
@@ -1228,6 +1259,7 @@
       keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
       CM.markdown(),
       syntaxHighlighting(defaultHighlightStyle),
+      codeMonoPlugin(CM),
       makeLivePreview(CM),
       searchMarkField,
       saveOnChange,

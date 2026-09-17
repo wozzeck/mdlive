@@ -2,7 +2,8 @@
 """Tablas en edicion: clic en una celda abre el cajon con la fuente de la celda.
 - el cajon no se sale del ancho de la celda (crece hacia abajo si la fuente no cabe)
 - una celda cuyo texto cabe justo no se parte (una sola linea)
-- la fuente se colorea como en el bloque en fuente (**negrita** con los asteriscos, en negrita)
+- la fuente se colorea como en el bloque en fuente (**negrita** con los asteriscos, en negrita;
+  `codigo` en monoespaciada, dentro y fuera de la celda)
 - Tab / Intro / Esc / clic fuera; fila corta; cabecera; Ctrl+Z; Ctrl+clic = tabla en fuente"""
 import time
 from mdlive_test import App, Check
@@ -83,6 +84,8 @@ try:
       return { weight: tok ? getComputedStyle(tok).fontWeight : null, mono: code ? getComputedStyle(code).fontFamily : null };""")
     c.eq("Ctrl+clic: tabla en fuente y misma negrita que en el cajon", src["weight"], info["weight"])
     c.eq("codigo en linea: misma fuente que en el bloque en fuente", mono, src["mono"])
+    c.ok("codigo en linea en monoespaciada (cajon)", mono is not None and "mono" in mono.lower(), "font-family %s" % mono)
+    c.ok("codigo en linea en monoespaciada (bloque en fuente)", src["mono"] is not None and "mono" in src["mono"].lower(), "font-family %s" % src["mono"])
 finally:
     app.close()
 c.finish()

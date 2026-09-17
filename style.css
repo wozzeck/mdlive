@@ -148,6 +148,15 @@ body {
 .cm-mdblock > :first-child { margin-top: 0; }
 .cm-mdblock > :last-child { margin-bottom: 0; }
 .mdblock-empty { color: var(--muted); font-style: italic; }
+/* codigo en FUENTE (bloque en edicion y cajon de celda): lo marca el JS por el arbol sintactico
+   (cm-mdcode = codigo en linea entero, con sus acentos graves; cm-mdcodetext = texto de un bloque
+   de codigo) y aqui lleva la letra y el fondo del codigo del visor */
+.cm-editor .cm-mdcode {
+  font-family: var(--font-mono); font-size: .88em;
+  background: var(--code-bg); color: var(--code-fg);
+  border: 1px solid var(--border); border-radius: 6px; padding: .08em .3em;
+}
+.cm-editor .cm-mdcodetext { font-family: var(--font-mono); font-size: .86em; }
 /* bloque en edicion: se ve como fuente y se sombrea para distinguirlo */
 .cm-editor .cm-editing { background: var(--editing-bg); }
 /* item de lista (no el primero) en fuente: replica el margin .25em de `li + li`
