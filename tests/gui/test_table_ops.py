@@ -2,7 +2,7 @@
 """Operaciones de tabla en edicion: mini-barra sobre la tabla, menu del clic derecho y atajos.
 - la mini-barra asoma pegada al borde superior izquierdo de la tabla mientras hay una celda abierta
 - realinear anchos, insertar fila (barra), borrar columna (menu), subir fila (Alt+arriba),
-  fila debajo (Ctrl+Intro), alinear columna (menu), Tab en la ultima celda anade fila
+  salto de linea en la celda (Ctrl+Intro = <br>), alinear columna (menu), Tab en la ultima celda anade fila
 - cada operacion es UN paso de deshacer; Esc con el menu abierto cierra solo el menu
 - las operaciones que no proceden (borrar la cabecera) salen deshabilitadas"""
 from mdlive_test import App, Check
@@ -76,14 +76,21 @@ try:
     app.key("ctrl+z")
     c.eq("Ctrl+Z deshace la operacion entera", app.line(5), "| Épica      | Prio  |   Estado |")
     c.eq("y solo esa", app.line(8), "| Nueva |       |          |")
-    # 5) atajos en el cajon: Alt+arriba sube la fila (y el cajon con ella); Ctrl+Intro fila debajo
+    # 5) atajos en el cajon: Alt+arriba sube la fila (y el cajon con ella); Ctrl+Intro = salto de
+    #    linea dentro de la celda: <br> en la fuente, salto visual en el cajon y el caret en la linea de abajo
     open_cell(TD % (3, 1)); app.key("alt+Up")
     c.eq("Alt+arriba: Pagos sube", app.line(8), "| Pagos      | media |          |")
     c.eq("y Nueva baja (re-alineada)", app.line(9), "| Nueva      |       |          |")
     box_over(TD % (2, 1), "el cajon sigue a la fila")
-    app.key("ctrl+Return")
-    c.eq("Ctrl+Intro: fila vacia debajo", app.line(9), "|            |       |          |")
-    box_over(TD % (3, 1), "y el cajon en ella")
+    app.key("End"); app.key("ctrl+Return")
+    br = app.js("""const v = CM.view.EditorView.findFromDOM(document.querySelector('.cm-cell-editor .cm-editor')), d = v.state.doc.toString();
+      const a = v.coordsAtPos(0), z = v.coordsAtPos(d.length), ln = document.querySelector('.cm-cell-editor .cm-line').getBoundingClientRect().height;
+      return { text: d, caret: v.state.selection.main.head, brk: !!document.querySelector('.cm-cell-editor .cm-brk'), down: (z && a) ? z.top - a.top : 0, lineH: ln }""")
+    c.ok("Ctrl+Intro: <br> en la fuente de la celda y el caret detras", br["text"] == "Pagos<br>" and br["caret"] == 9, str(br))
+    c.ok("y salto visual: el caret ya esta en la linea de abajo", br["brk"] and (br["down"] > 10 or br["lineH"] > 34), str(br))
+    app.key("Return")   # confirma y baja a la fila siguiente
+    c.eq("el .md lleva el <br> (confirmar una celda no re-alinea: conserva su relleno)", app.line(8), "| Pagos<br>      | media |          |")
+    box_over(TD % (3, 1), "y el cajon en la fila de abajo")
     # 6) Esc con el menu abierto (clic derecho en el cajon) cierra solo el menu
     r = app.rect(BOX); app.click(r["l"] + 8, r["t"] + r["h"] / 2, button=3)
     app.wait_js("const m = %s; return !!m && getComputedStyle(m).display !== 'none'" % MENU)

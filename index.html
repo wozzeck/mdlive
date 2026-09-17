@@ -120,7 +120,7 @@
           <tr><td>clic en celda</td><td>Tablas: edita esa celda en su sitio (su fuente); <kbd>Tab</kbd>/<kbd>Shift</kbd>+<kbd>Tab</kbd> celda siguiente/anterior, <kbd>Intro</kbd>/<kbd>Shift</kbd>+<kbd>Intro</kbd> abajo/arriba, <kbd>Esc</kbd> cancela. <kbd>Ctrl</kbd>+clic: la tabla entera en fuente</td></tr>
           <tr><td>clic derecho en celda</td><td>Tablas: menú con las operaciones (insertar, mover y eliminar filas y columnas, alinear la columna, realinear los anchos). Mientras se edita una celda, las más usadas asoman en una mini-barra sobre la tabla</td></tr>
           <tr><td><kbd>Tab</kbd> en la última celda</td><td>Tablas: añade una fila</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>Intro</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Intro</kbd></td><td>Tablas (en la celda): insertar fila debajo / encima</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Intro</kbd></td><td>Tablas (en la celda): salto de línea dentro de la celda (un <code>&lt;br&gt;</code> en el .md)</td></tr>
           <tr><td><kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>, <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd></td><td>Tablas (en la celda): mover la fila / la columna</td></tr>
         </table>
       </section>
@@ -854,9 +854,10 @@
         { key: 'Shift-Tab', run: () => { moveCell(0, -1); return true; } },
         { key: 'Enter', run: () => { moveCell(1, 0); return true; } },
         { key: 'Shift-Enter', run: () => { moveCell(-1, 0); return true; } },
+        // Ctrl+Intro: salto de linea DENTRO de la celda = un <br> en la fuente (markdown no tiene
+        // otra forma); el caret queda detras, ya en la linea de abajo (brBreakPlugin)
+        { key: 'Mod-Enter', run: () => { cellView.dispatch(cellView.state.replaceSelection('<br>')); return true; } },
         // operaciones de la tabla desde el cajon (las mismas que la mini-barra y el menu)
-        { key: 'Mod-Enter', run: () => { cellOp('rowBelow'); return true; } },
-        { key: 'Mod-Shift-Enter', run: () => { cellOp('rowAbove'); return true; } },
         { key: 'Alt-ArrowUp', run: () => { cellOp('rowUp'); return true; } },
         { key: 'Alt-ArrowDown', run: () => { cellOp('rowDown'); return true; } },
         { key: 'Alt-ArrowLeft', run: () => { cellOp('colPrev'); return true; } },
@@ -866,6 +867,7 @@
       CM.markdown(),
       syntaxHighlighting(defaultHighlightStyle),
       codeMonoPlugin(CM),
+      brBreakPlugin(CM),
       EditorView.theme({ '&': { backgroundColor: 'transparent' }, '&.cm-focused': { outline: 'none' },
                          '.cm-content': { fontFamily: 'var(--font-body)', caretColor: 'var(--fg)' } }),
     ];
@@ -957,8 +959,8 @@
   // derecho en cualquier celda (el nativo lo suprime mdlive.py, pero el evento contextmenu
   // del DOM llega igual) y con atajos en el cajon.
   const TABLE_ACTIONS = [
-    { op: 'rowAbove', label: 'Insertar fila encima', icon: 'rowAbove', key: 'Ctrl+Shift+Intro' },
-    { op: 'rowBelow', label: 'Insertar fila debajo', icon: 'rowBelow', key: 'Ctrl+Intro' },
+    { op: 'rowAbove', label: 'Insertar fila encima', icon: 'rowAbove' },
+    { op: 'rowBelow', label: 'Insertar fila debajo', icon: 'rowBelow' },
     { op: 'rowUp', label: 'Subir fila', icon: 'up', key: 'Alt+↑' },
     { op: 'rowDown', label: 'Bajar fila', icon: 'down', key: 'Alt+↓' },
     { op: 'rowDelete', label: 'Eliminar fila', icon: 'trash' },
@@ -978,7 +980,7 @@
   ];
   // la mini-barra lleva las mas usadas; el resto, en el menu (boton "..." o clic derecho)
   const TABLE_STRIP = [
-    { op: 'rowBelow', text: 'fila', icon: 'plus', title: 'Insertar fila debajo (Ctrl+Intro)' },
+    { op: 'rowBelow', text: 'fila', icon: 'plus', title: 'Insertar fila debajo' },
     { op: 'colRight', text: 'columna', icon: 'plus', title: 'Insertar columna a la derecha' },
     { op: 'rowDelete', text: 'fila', icon: 'trash', title: 'Eliminar fila' },
     { op: 'colDelete', text: 'columna', icon: 'trash', title: 'Eliminar columna' },
@@ -1232,6 +1234,27 @@
   // por el arbol sintactico: InlineCode entero (con sus acentos graves, como `**negrita**` se ve
   // en negrita con sus asteriscos) y el texto de los bloques de codigo (CodeText). El CSS pone
   // la letra y el fondo (.cm-mdcode / .cm-mdcodetext).
+  // Cajon de celda: cada `<br>` de la fuente es un salto de linea de la celda. La etiqueta se
+  // queda a la vista (atenuada) y detras va un widget que fuerza el salto visual, de modo que lo
+  // que sigue (y el caret) aparece en la linea de abajo, como en la tabla renderizada.
+  function brBreakPlugin(CM) {
+    const { Decoration, ViewPlugin, WidgetType } = CM.view;
+    class Brk extends WidgetType {
+      eq() { return true; }
+      toDOM() { const s = document.createElement('span'); s.className = 'cm-brk'; return s; }
+    }
+    const tag = Decoration.mark({ class: 'cm-brtag' }), brk = Decoration.widget({ widget: new Brk(), side: -1 });
+    function build(view) {
+      const ranges = [], text = view.state.doc.toString(), re = /<br\s*\/?>/gi;
+      let m;
+      while ((m = re.exec(text))) { ranges.push(tag.range(m.index, m.index + m[0].length)); ranges.push(brk.range(m.index + m[0].length)); }
+      return Decoration.set(ranges, true);
+    }
+    return ViewPlugin.fromClass(class {
+      constructor(view) { this.decorations = build(view); }
+      update(u) { if (u.docChanged) this.decorations = build(u.view); }
+    }, { decorations: (v) => v.decorations });
+  }
   function codeMonoPlugin(CM) {
     const { Decoration, ViewPlugin } = CM.view, { syntaxTree } = CM.language, { RangeSetBuilder } = CM.state;
     const inline = Decoration.mark({ class: 'cm-mdcode' }), block = Decoration.mark({ class: 'cm-mdcodetext' });

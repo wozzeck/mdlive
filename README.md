@@ -78,7 +78,7 @@ sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1
 | clic en una celda | Tablas: edita esa celda en su sitio (su fuente); `Tab`/`Shift`+`Tab` celda siguiente/anterior, `Intro`/`Shift`+`Intro` abajo/arriba, `Esc` cancela; `Ctrl`+clic abre la tabla entera en fuente |
 | clic derecho en una celda | Tablas: menú con las operaciones (insertar, mover y eliminar filas y columnas, alinear la columna, realinear los anchos de la fuente). Mientras se edita una celda, las más usadas asoman en una mini-barra sobre la tabla |
 | `Tab` en la última celda | Tablas: añade una fila |
-| `Ctrl`+`Intro` / `Ctrl`+`Shift`+`Intro` | Tablas (en la celda): insertar fila debajo / encima |
+| `Ctrl`+`Intro` | Tablas (en la celda): salto de línea dentro de la celda (un `<br>` en el .md; el cajón lo muestra como salto) |
 | `Alt`+`↑`/`↓`, `Alt`+`←`/`→` | Tablas (en la celda): mover la fila / la columna |
 
 Cada atajo de formato actúa sobre la selección o, si no hay nada seleccionado, sobre la palabra bajo el cursor.

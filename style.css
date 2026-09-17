@@ -213,6 +213,8 @@ body.lightbox-open #lightbox { display: flex; align-items: center; justify-conte
    encima de la celda con su relleno y tipografia (los copia el JS) y lleva dentro un
    CodeMirror con el mismo coloreado que el bloque en fuente. Tab/Intro confirman y pasan a la
    celda siguiente / de abajo, Esc cancela, clic fuera confirma */
+.cm-cell-editor .cm-brtag { color: var(--muted); font-family: var(--font-mono); font-size: .8em; }
+.cm-cell-editor .cm-brk { display: block; height: 0; }   /* salto visual tras cada <br> de la celda */
 .cm-cell-editor {
   position: absolute; z-index: 60; box-sizing: border-box;
   background: var(--editing-bg); color: var(--fg);
