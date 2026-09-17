@@ -122,7 +122,7 @@ class App:
         time.sleep(delay)
 
     def move(self, x, y):
-        self.xdo("mousemove", "--window", self.win, str(int(x)), str(int(y)))
+        self.xdo("mousemove", "--window", self.win, str(int(round(x))), str(int(round(y))))
 
     def click(self, x, y, button=1, mods=(), delay=0.5):
         self.move(x, y)

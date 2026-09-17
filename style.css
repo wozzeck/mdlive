@@ -524,6 +524,9 @@ body.minimap-on #minimap {
 /* el clon va fuera de pantalla: content-visibility:auto dejaría los diagramas mermaid en
    blanco y reservaría alturas falsas (320px) -> forzar pintado y alto real en el minimapa */
 #minimap-canvas .mermaid { content-visibility: visible; contain-intrinsic-size: auto; }
+/* el primer bloque sin margen superior, como en la pagina (#content > :first-child y el widget
+   .cm-mdblock lo llevan a 0; el clon pierde el id y lo recuperaba): asi mide lo mismo */
+#minimap-canvas .markdown-body > :first-child { margin-top: 0; }
 /* recuadro de la porción visible, por encima del lienzo */
 #minimap-viewport {
   position: absolute; left: 0; right: 0; z-index: 1; pointer-events: none;

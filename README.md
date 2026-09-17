@@ -98,7 +98,7 @@ tests/run.sh unit     # solo los unitarios
 ```
 
 - **Unitarios** (`tests/unit/*.test.js`, node sin dependencias): las funciones puras del editor —unir líneas, troceado en unidades (listas ítem a ítem), celdas y operaciones de tabla— van marcadas en `index.html` con `// @test-begin <nombre>` … `// @test-end`; el runner las extrae y las ejecuta con el markdown-it vendorizado.
-- **Integración** (`tests/gui/test_*.py`): lanza la aplicación real sobre una copia de `tests/fixtures/*.md`, aislada (`XDG_*` a un directorio temporal: recientes, instancias y `localStorage` propios), con teclado y ratón reales (`xdotool`), capturas (`import`) y consulta del DOM por el canal de pruebas de `mdlive.py` (`MDLIVE_TEST_DIR`, ficheros `cmd-*.js`/`res-*.json`). Necesita `DISPLAY`, `xdotool`, `imagemagick` y `python3-pil`. Cubre el título de la ventana, unir líneas, el tooltip del índice, la edición de celdas, las operaciones de tabla, el código en fuente (monoespaciada) y la igualdad píxel a píxel visor/editor con listas.
+- **Integración** (`tests/gui/test_*.py`): lanza la aplicación real sobre una copia de `tests/fixtures/*.md`, aislada (`XDG_*` a un directorio temporal: recientes, instancias y `localStorage` propios), con teclado y ratón reales (`xdotool`), capturas (`import`) y consulta del DOM por el canal de pruebas de `mdlive.py` (`MDLIVE_TEST_DIR`, ficheros `cmd-*.js`/`res-*.json`). Necesita `DISPLAY`, `xdotool`, `imagemagick` y `python3-pil`. Cubre el título de la ventana, unir líneas, el tooltip del índice, la edición de celdas, las operaciones de tabla, el código en fuente (monoespaciada), el recuadro del minimapa (visor y edición) y la igualdad píxel a píxel visor/editor con listas.
 
 ## Estructura
 

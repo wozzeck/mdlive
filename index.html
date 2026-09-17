@@ -120,6 +120,13 @@
     if (s.indexOf('file:') === 0) return true;
     return /^(vbscript|javascript|data):/.test(s) ? /^data:image\/(gif|png|jpeg|webp);/.test(s) : true;
   };
+  // lineas de origen en los bloques del lienzo del minimapa (data-line = primera linea del
+  // bloque, 0-based): solo cuando se renderiza con env.mmLines; el visor y los widgets no lo usan
+  md.core.ruler.push('mdlive_lines', (state) => {
+    if (!state.env || !state.env.mmLines) return true;
+    for (const t of state.tokens) if (t.block && t.map && t.nesting >= 0 && !t.hidden && t.type !== 'html_block') t.attrSet('data-line', String(t.map[0]));
+    return true;
+  });
 
   const content = document.getElementById('content');
   const editorHost = document.getElementById('editor');
@@ -1248,6 +1255,8 @@
     });
     const saveOnChange = EditorView.updateListener.of((u) => {
       if (u.docChanged) { docSource = u.state.doc.toString(); lastFetched = docSource; scheduleSave(); scheduleMinimapBuild(); }
+      // el bloque en fuente cambia de sitio o de alto (caret a otro bloque, widgets medidos): recuadro al dia
+      if (u.docChanged || u.selectionSet || u.geometryChanged) scheduleMinimapUpdate();
     });
     return [
       history(),
@@ -2267,6 +2276,11 @@
   let mmLastW = 0;        // ancho de contenido del último build (para evitar re-clonar en resize)
   let mmBuildTimer = null;
   let mmDragging = false;
+  let mmAnchors = null;   // edicion: [{line, y}] bloques del lienzo (data-line -> y sin escalar), en orden
+  let mmAnchorsH = 0;     // alto del clon cuando se midieron (si cambia -- imagenes, diagramas -- se remiden)
+  let mmCloneEnd = 0;     // y del final del contenido del clon (sin su relleno inferior)
+  let mmLines = 1;        // lineas del documento renderizado en el lienzo
+  let mmUpdTick = false;
 
   function minimapOn() { return document.body.classList.contains('minimap-on'); }
 
@@ -2294,18 +2308,21 @@
     } else {
       clone = document.createElement('article');
       clone.className = 'markdown-body';
-      clone.innerHTML = md.render(docSource);
+      clone.innerHTML = md.render(docSource, { mmLines: true });
     }
     clone.style.boxSizing = 'border-box';  // border-box + ancho real => mismo wrapping/alto
     clone.style.width = w + 'px';
     clone.style.maxWidth = 'none';
+    clone.style.position = 'relative';     // las anclas se miden con offsetTop hasta el clon
     minimapCanvas.innerHTML = '';
     minimapCanvas.appendChild(clone);
     minimapCanvas.style.width = w + 'px';
     if (host !== content) {
       decorateSync(clone);   // ya insertado y con su ancho: mermaid mide bien
       if (searchQuery) highlightInElement(clone, searchQuery);
-    }
+      mmLines = docSource.split('\n').length;
+      mmRefreshAnchors(clone);
+    } else mmAnchors = null;   // en el visor el lienzo es un clon exacto del contenido: misma y que la pagina
     updateMinimap();
     renderMinimapMarks();
   }
@@ -2325,31 +2342,124 @@
     else scheduleMinimapBuild();
   }
   // Recuadro de la ventana visible + desplazamiento del lienzo (barato: solo transforms).
-  // El lienzo se transforma con `translateY(t) scale(s)` => cssY = t + s*docY; por eso el
-  // recuadro va en top = scrollTop*s + t y, para documentos altos, el lienzo se desplaza
-  // bajo el recuadro (que recorre el panel de arriba a abajo), igual que en Sublime/VSCode.
+  // El lienzo se transforma con `translateY(t) scale(s)` => cssY = t + s*y; por eso el
+  // recuadro va en top = y0*s + t y, para documentos altos, el lienzo se desplaza bajo el
+  // recuadro (que recorre el panel de arriba a abajo), igual que en Sublime/VSCode. [y0, y1]
+  // es lo visible en px del LIENZO (mmVisible), no el scroll de la pagina: en edicion no
+  // coinciden.
   function updateMinimap() {
     if (!minimapOn() || !mmScale) return;
-    const sc = document.scrollingElement;
-    const vh = sc.clientHeight;
-    const H = sc.scrollHeight;
+    const clone = minimapCanvas.firstElementChild;
+    if (!clone) return;
+    const cH = clone.offsetHeight;
+    if (mmAnchors && cH !== mmAnchorsH) mmRefreshAnchors(clone);   // imagenes o diagramas que han cambiado el alto
+    const v = mmVisible();
+    const y0 = Math.max(0, Math.min(cH, v.top)), y1 = Math.max(y0, Math.min(cH, v.bottom));
     const panelH = minimap.clientHeight;
-    const scaledH = H * mmScale;
-    const ih = vh * mmScale;                       // alto del recuadro
-    const scrollTop = sc.scrollTop;
+    const scaledH = cH * mmScale;
+    const ih = (y1 - y0) * mmScale;                // alto del recuadro
     if (scaledH <= panelH) {
       mmTranslate = 0;                             // cabe entero: lienzo fijo arriba
     } else {
-      const docScrollable = Math.max(1, H - vh);
-      const frac = Math.min(1, Math.max(0, scrollTop / docScrollable));
-      mmTranslate = frac * (panelH - ih) - scrollTop * mmScale;
+      const scrollable = Math.max(1, cH - (y1 - y0));
+      const frac = Math.min(1, Math.max(0, y0 / scrollable));
+      mmTranslate = frac * (panelH - ih) - y0 * mmScale;
       mmTranslate = Math.max(Math.min(0, panelH - scaledH), Math.min(0, mmTranslate));
     }
     mmTy = Math.round(mmTranslate);  // snap a pixel entero -> reduce el difuminado del escalado
     minimapCanvas.style.transform = 'translateY(' + mmTy + 'px) scale(' + mmScale + ')';
     minimapMarks.style.transform = 'translateY(' + mmTy + 'px)';
-    minimapViewport.style.top = (scrollTop * mmScale + mmTy).toFixed(2) + 'px';
+    minimapViewport.style.top = (y0 * mmScale + mmTy).toFixed(2) + 'px';
     minimapViewport.style.height = Math.max(2, ih).toFixed(2) + 'px';
+  }
+  function scheduleMinimapUpdate() {
+    if (mmUpdTick || !minimapOn()) return;
+    mmUpdTick = true;
+    requestAnimationFrame(() => { mmUpdTick = false; updateMinimap(); });
+  }
+  // Lo visible de la pagina en coordenadas del LIENZO (px sin escalar). En el visor el lienzo
+  // es un clon exacto del contenido: la misma y, descontado donde empieza el contenido. En
+  // edicion la pagina la maqueta CodeMirror -- con el bloque en fuente, que mide distinto que
+  // renderizado, y todo lo de debajo corrido -- y el lienzo es el documento renderizado aparte:
+  // se pasa por las LINEAS del documento (mapa de alturas de CM <-> anclas data-line del clon).
+  function mmVisible() {
+    const sc = document.scrollingElement, p0 = sc.scrollTop, p1 = p0 + sc.clientHeight;
+    if (editMode && cmView) return { top: mmCanvasOfPage(p0), bottom: mmCanvasOfPage(p1) };
+    const cTop = content.getBoundingClientRect().top + sc.scrollTop;
+    return { top: p0 - cTop, bottom: p1 - cTop };
+  }
+  // anclas del lienzo: [{line, y}] por cada bloque con data-line, en orden y con y creciente
+  function mmRefreshAnchors(clone) {
+    const out = [];
+    let lastLine = -1, lastY = -1;
+    for (let el of clone.querySelectorAll('[data-line]')) {
+      const line = +el.dataset.line;
+      // anidado que empieza en la misma linea (li > p): vale el exterior; sin offsetParent = no pintado (details cerrado)
+      if (!(line > lastLine) || !el.offsetParent) continue;
+      if (el.tagName === 'CODE' && el.parentElement.tagName === 'PRE') el = el.parentElement;   // fence: el bloque es el pre
+      let y = 0;
+      for (let n = el; n && n !== clone; n = n.offsetParent) y += n.offsetTop;
+      if (y < lastY) continue;
+      out.push({ line, y }); lastLine = line; lastY = y;
+    }
+    mmAnchors = out;
+    mmAnchorsH = clone.offsetHeight;
+    mmCloneEnd = mmAnchorsH - (parseFloat(getComputedStyle(clone).paddingBottom) || 0);
+  }
+  // ultima ancla con line <= l / primera con line >= l (o el final del contenido del clon)
+  function mmAnchorLE(l) {
+    const A = mmAnchors || []; let lo = 0, hi = A.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (A[m].line <= l) lo = m + 1; else hi = m; }
+    return lo > 0 ? A[lo - 1] : { line: 0, y: 0 };
+  }
+  function mmAnchorGE(l) {
+    const A = mmAnchors || []; let lo = 0, hi = A.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (A[m].line < l) lo = m + 1; else hi = m; }
+    return lo < A.length ? A[lo] : { line: mmLines, y: mmCloneEnd };
+  }
+  // lineas [l0, l1) 0-based del bloque `b` de CM. El `to` de un bloque es siempre un FINAL de
+  // linea (blockEnd: la ultima linea en blanco absorbida por el widget; una linea de fuente; el
+  // hueco de longitud 0), asi que la linea de `to` es suya aunque este vacia (from == to). Tratar
+  // ese caso como "principio de la linea siguiente" dejaba al encabezado sin su linea en blanco y
+  // repartia mal la altura del bloque (el clic en el minimapa se quedaba ~14 px corto).
+  function mmBlockLines(doc, b) {
+    return [doc.lineAt(b.from).number - 1, doc.lineAt(b.to).number];
+  }
+  // linea (0-based, fraccional) -> y del lienzo, entre las anclas mas finas que la rodean
+  function mmCanvasY(lineF) {
+    const a = mmAnchorLE(lineF), b = mmAnchorGE(Math.floor(lineF) + 1), span = b.line - a.line;
+    return span > 0 ? a.y + (lineF - a.line) / span * (b.y - a.y) : a.y;
+  }
+  // y del lienzo -> linea (0-based, fraccional): la inversa
+  function mmLineOfCanvasY(y) {
+    const A = mmAnchors || []; let lo = 0, hi = A.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (A[m].y <= y) lo = m + 1; else hi = m; }
+    const a = lo > 0 ? A[lo - 1] : { line: 0, y: 0 }, b = lo < A.length ? A[lo] : { line: mmLines, y: mmCloneEnd };
+    const span = b.y - a.y;
+    return span > 0 ? a.line + (Math.min(y, b.y) - a.y) / span * (b.line - a.line) : a.line;
+  }
+  // edicion: y de la pagina -> y del lienzo. El bloque de CM que hay a esa altura es, o bien una
+  // unidad renderizada (widget de varias lineas), que en el lienzo se pinta IGUAL: misma
+  // fraccion de alto entre el ancla de su primera linea y la de la unidad siguiente (las anclas
+  // interiores -- filas de una tabla -- no van a proporcion de lineas y no sirven); o bien una
+  // linea de texto (unidad en fuente): por lineas, entre las anclas mas finas.
+  function mmCanvasOfPage(pageY) {
+    const doc = cmView.state.doc, h = pageY - (cmView.documentTop + window.scrollY);
+    if (h <= 0) return mmAnchorLE(0).y + h;
+    const b = cmView.lineBlockAtHeight(h), [l0, l1] = mmBlockLines(doc, b);
+    const f = b.height > 0 ? Math.min(1, Math.max(0, (h - b.top) / b.height)) : 0;
+    if (l1 - l0 > 1) { const a = mmAnchorLE(l0), z = mmAnchorGE(l1); return a.y + f * (z.y - a.y); }
+    return mmCanvasY(l0 + f);
+  }
+  // edicion: y del lienzo -> y de la pagina (la inversa, para el clic en el minimapa)
+  function mmPageOfCanvas(y) {
+    const doc = cmView.state.doc, lineF = mmLineOfCanvasY(y);
+    const n = Math.max(1, Math.min(doc.lines, Math.floor(lineF) + 1));
+    const b = cmView.lineBlockAt(doc.line(n).from), [l0, l1] = mmBlockLines(doc, b);
+    let f = lineF - l0;
+    if (l1 - l0 > 1) { const a = mmAnchorLE(l0), z = mmAnchorGE(l1); f = z.y > a.y ? (y - a.y) / (z.y - a.y) : 0; }
+    f = Math.min(1, Math.max(0, f));
+    return cmView.documentTop + window.scrollY + b.top + f * b.height;
   }
   // Marcas de las coincidencias de búsqueda sobre el minimapa (regla tipo Sublime).
   // Viven en coordenadas del lienzo SIN escalar (top = docY*scale) y comparten el mismo
@@ -2411,14 +2521,26 @@
     minimapGutter.innerHTML = '';
     minimapGutter.appendChild(frag);
   }
-  // Mapea un punto del panel a una posición de scroll (centra el punto pulsado).
+  // Mapea un punto del panel a una posición de scroll (centra el punto pulsado). El punto va
+  // en px del lienzo; a la pagina se pasa como en mmVisible, pero a la inversa.
+  let mmSettle = 0;   // id del ultimo clic: solo el ultimo hace sus pases de ajuste
   function minimapScrollTo(clientY) {
     if (!mmScale) return;
-    const r = minimap.getBoundingClientRect();
-    const docY = (clientY - r.top - mmTranslate) / mmScale;
-    const sc = document.scrollingElement;
-    const target = docY - sc.clientHeight / 2;
-    sc.scrollTop = Math.max(0, Math.min(sc.scrollHeight - sc.clientHeight, target));
+    const r = minimap.getBoundingClientRect(), sc = document.scrollingElement;
+    const y = (clientY - r.top - mmTranslate) / mmScale;
+    const go = () => {
+      const pageY = (editMode && cmView) ? mmPageOfCanvas(y) : y + content.getBoundingClientRect().top + sc.scrollTop;
+      const target = Math.max(0, Math.min(sc.scrollHeight - sc.clientHeight, pageY - sc.clientHeight / 2));
+      if (Math.abs(target - sc.scrollTop) >= 1) sc.scrollTop = target;
+    };
+    go();
+    // en edicion la altura de lo que no se ha visto aun es estimada: al llegar, CM mide y el
+    // destino se corre unos px; se repite un par de fotogramas ya con medidas
+    if (editMode && cmView) {
+      const id = ++mmSettle;
+      const again = (n) => { if (id !== mmSettle) return; go(); if (n) requestAnimationFrame(() => again(n - 1)); };
+      requestAnimationFrame(() => again(1));
+    }
   }
   minimap.addEventListener('mousedown', (e) => {
     if (!minimapOn() || mmDragging) return;
