@@ -8,7 +8,7 @@ Pensado para abrir un `.md` y verlo actualizarse al vuelo mientras lo editas con
 
 - **Live reload**: si el `.md` cambia en disco, la vista se refresca al instante (también recarga `style.css` e `index.html` en caliente).
 - **Título de la ventana**: `nombre.md - dd/mm/aaaa HH:MM - mdlive`, con la fecha de la última modificación del fichero; se actualiza al guardar desde el editor y cuando el `.md` cambia en disco.
-- **Edición WYSIWYG por bloques** (CodeMirror 6): todo el documento se ve renderizado salvo el bloque donde está el cursor, que se muestra como fuente y se resalta. Guarda directo al fichero.
+- **Edición WYSIWYG por bloques** (CodeMirror 6): todo el documento se ve renderizado salvo el bloque donde está el cursor, que se muestra como fuente y se resalta. Guarda directo al fichero. Si el bloque tiene saltos de línea que al leer no se ven (texto partido a mano), un botón en su esquina —o `Ctrl`+`J`— los quita.
 - **Índice/árbol del documento**: panel lateral con la jerarquía de encabezados, colapsable, redimensionable y con *scroll-spy* (resalta el apartado visible), tanto en visor como en editor.
 - **Minimapa** (`m`): miniatura a escala de todo el documento en la parte derecha (estilo Sublime Text), con un recuadro que marca la ventana visible y se mueve con el scroll; haz clic o arrastra sobre la miniatura para navegar. Ancho ajustable con un tirador en su borde izquierdo (se recuerda). Las coincidencias de la búsqueda se marcan sobre el minimapa; con el minimapa apagado, aparecen en una franja fina a la derecha (esta franja, solo en el visor). Funciona igual en el visor y en el editor.
 - **Buscador** (`Ctrl`+`F`): comparte el panel lateral con el índice, resalta las coincidencias en visor y editor y las lista con su número de línea; `Intro` (o `Ctrl`+`N`/`Ctrl`+`P`) navega por todas las ocurrencias con un breve halo de localización.
@@ -69,6 +69,8 @@ sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1
 | `Ctrl`+`Shift`+`K` | Enlace |
 | `Ctrl`+`Shift`+`.` | Cita |
 | `Ctrl`+`1`…`6` | Encabezado de nivel 1–6 (alterna) |
+| `Ctrl`+`J` | Unir las líneas del bloque: quita los saltos de línea que al leer no se ven (también con el botón de la esquina del bloque) |
+| `Ctrl`+`Shift`+`J` | Lo mismo en todo el documento |
 
 Cada atajo de formato actúa sobre la selección o, si no hay nada seleccionado, sobre la palabra bajo el cursor.
 

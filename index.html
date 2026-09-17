@@ -90,6 +90,8 @@
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></td><td>Enlace</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>.</kbd></td><td>Cita</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>6</kbd></td><td>Encabezado nivel 1–6 (alterna)</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>J</kbd></td><td>Unir las líneas del bloque: quita los saltos de línea que al leer no se ven (también con el botón de la esquina del bloque)</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd></td><td>Lo mismo en todo el documento</td></tr>
         </table>
       </section>
     </div>
@@ -355,6 +357,23 @@
       toDOM() { const d = document.createElement('div'); d.className = 'cm-blockgap'; d.style.height = this.rem.toFixed(3) + 'rem'; return d; }
       ignoreEvent() { return true; }
     }
+    // boton "unir lineas" en la esquina del bloque en edicion: solo se pone si el bloque
+    // tiene saltos de linea que al leer no se ven (softJoins); hace lo mismo que Ctrl+J
+    const JOIN_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22v-6"/><path d="M12 8V2"/><path d="M4 12H2"/><path d="M10 12H8"/><path d="M16 12h-2"/><path d="M22 12h-2"/><path d="m15 19-3-3-3 3"/><path d="m15 5-3 3-3-3"/></svg>';
+    class JoinWidget extends WidgetType {
+      constructor(from, n) { super(); this.from = from; this.n = n; }
+      eq(o) { return o.from === this.from && o.n === this.n; }
+      toDOM(view) {
+        const el = document.createElement('span');
+        el.className = 'cm-joinbtn';
+        el.title = 'Quitar ' + (this.n === 1 ? 'el salto de línea que' : this.n + ' saltos de línea que') + ' al leer no se ' + (this.n === 1 ? 've' : 'ven') + ' (Ctrl+J)';
+        el.innerHTML = JOIN_ICON + 'unir líneas';
+        // mousedown y no click: asi CM no mueve el caret al pulsar, y el bloque sigue en fuente
+        el.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); cmJoinAt(view, this.from); });
+        return el;
+      }
+      ignoreEvent() { return true; }
+    }
     function build(state) {
       const b = new RangeSetBuilder();
       const sel = state.selection.main;
@@ -386,12 +405,14 @@
           const cl = (nextB && blankTo >= blankFrom && sel.to >= blankFrom && sel.from <= blankTo)
             ? doc.lineAt(sel.head) : null;
           const lastLine = (cl || doc.lineAt(blk.to)).number;
+          const joins = softJoins(doc, blk).length;
           let ln = doc.lineAt(blk.from), prevItem = false;
           for (;;) {
             const item = ITEM_RE.test(ln.text);
             const hm = ln.text.match(HEAD_RE);
             const cls = hm ? ('cm-editing cm-edit-h' + hm[1].length) : ((item && prevItem) ? 'cm-editing cm-li-gap' : 'cm-editing');
             b.add(ln.from, ln.from, lineDeco(cls));
+            if (joins && ln.from === blk.from) b.add(ln.from, ln.from, Decoration.widget({ widget: new JoinWidget(blk.from, joins), side: -1 }));
             prevItem = item;
             if (ln.number >= lastLine) break;
             ln = doc.line(ln.number + 1);
@@ -475,6 +496,46 @@
     view.dispatch({ changes: { from, to, insert }, selection: { anchor: urlAt, head: urlAt + 3 } });
     view.focus(); return true;
   }
+  // ---- unir lineas: quitar los saltos que al leer no se ven -----------------
+  // markdown-it va sin `breaks`, asi que un salto de linea simple dentro de un parrafo
+  // renderiza como un espacio: la fuente tiene N lineas y el visor una. Estos comandos los
+  // quitan. Se respetan los saltos DUROS (dos espacios o una `\` al final de la linea, que
+  // si renderizan <br>), y de la linea que se sube se quitan los marcadores del contenedor
+  // (`>` de cita, sangria de item), que en la linea unida sobrarian. Solo parrafos: fences,
+  // tablas, encabezados y HTML no tienen tokens paragraph_open y quedan fuera solos.
+  function hardBreak(t) {
+    if (/ {2,}$/.test(t)) return true;
+    const m = t.match(/\\+$/);
+    return !!m && m[0].length % 2 === 1;   // `\\` es una barra escapada, no un salto
+  }
+  // cambios que unen las lineas del bloque (vacio si no hay nada que unir)
+  function softJoins(doc, blk) {
+    const first = doc.lineAt(blk.from).number, changes = [];
+    let tokens;
+    try { tokens = md.parse(blk.text, {}); } catch (_) { return changes; }
+    for (const t of tokens) {
+      if (t.type !== 'paragraph_open' || !t.map) continue;
+      for (let k = t.map[0]; k < t.map[1] - 1; k++) {
+        const a = doc.line(first + k), z = doc.line(first + k + 1);
+        if (hardBreak(a.text)) continue;
+        const tail = a.text.match(/\s*$/)[0].length;      // 0 o 1 espacios: con 2+ era salto duro
+        const head = z.text.match(/^[\s>]*/)[0].length;   // sangria y `>` del contenedor
+        changes.push({ from: a.to - tail, to: z.from + head, insert: ' ' });
+      }
+    }
+    return changes;
+  }
+  function joinBlocks(view, pick) {
+    const st = view.state, doc = st.doc, blocks = blocksOf(st);
+    let changes = [];
+    blocks.forEach((blk, i) => { if (pick(blk, blockEnd(doc, blocks, i))) changes = changes.concat(softJoins(doc, blk)); });
+    if (changes.length) view.dispatch({ changes });
+    return true;
+  }
+  // Ctrl+J: los bloques que toca la seleccion; Ctrl+Shift+J: todo el documento; el boton: su bloque
+  function cmJoinSel(view) { const s = view.state.selection.main; return joinBlocks(view, (blk, end) => s.from <= end && s.to >= blk.from); }
+  function cmJoinAll(view) { return joinBlocks(view, () => true); }
+  function cmJoinAt(view, pos) { return joinBlocks(view, (blk, end) => pos >= blk.from && pos <= end); }
   // ---- movimiento VERTICAL del cursor en el editor -------------------------
   // Con el live-preview, todo lo que no toca la selección son widgets de bloque. CM
   // resuelve el movimiento vertical por coordenadas y, al no encontrar ninguna línea de
@@ -552,6 +613,8 @@
       { key: 'Mod-4', run: (v) => cmHeading(v, 4), preventDefault: true },
       { key: 'Mod-5', run: (v) => cmHeading(v, 5), preventDefault: true },
       { key: 'Mod-6', run: (v) => cmHeading(v, 6), preventDefault: true },
+      { key: 'Mod-j', run: cmJoinSel, preventDefault: true },
+      { key: 'Mod-Shift-j', run: cmJoinAll, preventDefault: true },
     ]);
   }
 
