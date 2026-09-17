@@ -56,7 +56,7 @@ class Check:
 
 
 class App:
-    def __init__(self, fixture, size=(1100, 900)):
+    def __init__(self, fixture, size=(1100, 900), lang="es"):
         self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="mdlive-test-"))
         for d in ("data", "cache", "run", "cmd"):
             (self.tmp / d).mkdir()
@@ -67,7 +67,7 @@ class App:
         if assets.is_dir():
             shutil.copytree(assets, self.tmp / assets.name)
         env = dict(os.environ, DISPLAY=DISPLAY, XDG_DATA_HOME=str(self.tmp / "data"), XDG_CACHE_HOME=str(self.tmp / "cache"),
-                   XDG_RUNTIME_DIR=str(self.tmp / "run"), MDLIVE_TEST_DIR=str(self.tmp / "cmd"))
+                   XDG_RUNTIME_DIR=str(self.tmp / "run"), MDLIVE_TEST_DIR=str(self.tmp / "cmd"), MDLIVE_LANG=lang)
         self.log = (self.tmp / "app.log").open("w")
         self.proc = subprocess.Popen([sys.executable, str(ROOT / "mdlive.py"), str(self.md)], env=env,
                                      stdout=self.log, stderr=subprocess.STDOUT, start_new_session=True)

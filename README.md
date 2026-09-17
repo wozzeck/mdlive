@@ -19,6 +19,7 @@ Pensado para abrir un `.md` y verlo actualizarse al vuelo mientras lo editas con
 - **Chincheta** (`p`): fija en la parte superior la jerarquía de títulos de la sección visible (sticky), como la cabecera de una tabla. Con la chincheta activa, las cabeceras de las tablas largas también quedan fijas bajo la barra mientras se recorre la tabla (en visor y editor).
 - **Enlaces**: se abren en el navegador del sistema; al pasar el ratón por encima, su destino aparece abajo a la izquierda (como un navegador); con el botón derecho, «Copiar enlace».
 - **Rendimiento en ficheros grandes**: resaltado de código y diagramas perezosos (IntersectionObserver), scroll directo.
+- **Idioma**: la interfaz sigue el idioma del sistema (`LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG`; `MDLIVE_LANG=en` lo fuerza). Español (fuente), inglés, alemán, francés, italiano y portugués; un idioma sin diccionario cae al inglés. Para añadir uno: copiar `i18n/en.json` a `i18n/<código>.json` y traducir los valores (las claves son el texto en español); `node tests/unit/run.js` comprueba que no falte ni sobre ninguna clave.
 - **Offline**: todas las dependencias están vendorizadas en `vendor/` (markdown-it, highlight.js, mermaid, CodeMirror).
 - **Mermaid** y resaltado de sintaxis integrados.
 - **Zoom de solo texto** (`Ctrl`+rueda) que conserva el punto de lectura.

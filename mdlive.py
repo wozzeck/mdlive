@@ -40,6 +40,45 @@ INSTANCES_DIR = _RUN_HOME / "mdlive" / "instances"
 TEST_DIR = pathlib.Path(os.environ["MDLIVE_TEST_DIR"]) if os.environ.get("MDLIVE_TEST_DIR") else None
 
 
+# Idioma de la interfaz: MDLIVE_LANG > LANGUAGE > LC_ALL > LC_MESSAGES > LANG. Las cadenas fuente son el
+# espanol; i18n/<lang>.json (estilo gettext: clave = texto en espanol) traduce la UI entera (HTML, JS y
+# estos dialogos). Un idioma sin fichero cae al ingles. Devuelve (lang, locale, diccionario).
+def _pick_lang():
+    def load(name):
+        f = APP_DIR / "i18n" / (name + ".json")
+        try:
+            return json.loads(f.read_text(encoding="utf-8")) if f.is_file() else None
+        except ValueError:
+            return None
+    forced = os.environ.get("MDLIVE_LANG")   # forzado: solo ese (sin diccionario -> ingles)
+    cands = [forced] if forced else (os.environ.get("LANGUAGE", "").split(":")
+                                     + [os.environ.get(v) for v in ("LC_ALL", "LC_MESSAGES", "LANG")])
+    for c in cands:                       # el primer candidato con traduccion decide
+        if not c or c.lower() in ("c", "posix"):
+            continue
+        code = c.split(".")[0].split("@")[0].replace("-", "_")
+        base = code.split("_")[0].lower()
+        locale = code.replace("_", "-")
+        if base == "es":
+            return "es", locale, {}
+        for name in (code, base):
+            d = load(name)
+            if d is not None:
+                return base, locale, d
+    return "en", "en", load("en") or {}
+
+
+LANG, LOCALE, STRINGS = _pick_lang()
+
+
+def T(key, **vars):
+    """Traduce una cadena de la UI (clave = texto en espanol) y rellena los {marcadores}."""
+    out = STRINGS.get(key) or key
+    for k, v in vars.items():
+        out = out.replace("{" + k + "}", str(v))
+    return out
+
+
 def _pid_alive(pid):
     if not isinstance(pid, int) or pid <= 0:
         return False
@@ -139,15 +178,15 @@ def most_recent_existing():
 
 def pick_file_dialog():
     """Selector GTK para elegir un .md (cuando no hay historial util). None si se cancela."""
-    dlg = Gtk.FileChooserDialog(title="Abrir Markdown", action=Gtk.FileChooserAction.OPEN)
-    dlg.add_buttons("_Cancelar", Gtk.ResponseType.CANCEL, "_Abrir", Gtk.ResponseType.ACCEPT)
+    dlg = Gtk.FileChooserDialog(title=T("Abrir Markdown"), action=Gtk.FileChooserAction.OPEN)
+    dlg.add_buttons(T("_Cancelar"), Gtk.ResponseType.CANCEL, T("_Abrir"), Gtk.ResponseType.ACCEPT)
     flt = Gtk.FileFilter()
     flt.set_name("Markdown")
     for pat in ("*.md", "*.markdown", "*.mkd", "*.mdown", "*.mdwn"):
         flt.add_pattern(pat)
     dlg.add_filter(flt)
     flt_all = Gtk.FileFilter()
-    flt_all.set_name("Todos los ficheros")
+    flt_all.set_name(T("Todos los ficheros"))
     flt_all.add_pattern("*")
     dlg.add_filter(flt_all)
     target = dlg.get_filename() if dlg.run() == Gtk.ResponseType.ACCEPT else None
@@ -386,6 +425,10 @@ class MdLive(Gtk.Window):
 
         if path in ("", "index.html"):
             data, mime = self._read(APP_DIR / "index.html", b"<h1>falta index.html</h1>"), MIME[".html"]
+            # idioma de la interfaz: atributo lang y diccionario para el bloque de idioma del script
+            data = data.replace(b'<html lang="es">', ('<html lang="%s">' % LANG).encode("utf-8"), 1)
+            i18n = json.dumps({"lang": LANG, "locale": LOCALE, "strings": STRINGS}, ensure_ascii=False)
+            data = data.replace(b"/*I18N*/{}", i18n.replace("</", "<\\/").encode("utf-8"), 1)
         elif path == "style.css":
             data, mime = self._read(APP_DIR / "style.css", b"/* falta style.css */"), MIME[".css"]
         elif path == "raw":
@@ -445,8 +488,8 @@ class MdLive(Gtk.Window):
             self._print_pdf(html, path)
 
     def _save_dialog(self, name, kind):
-        dlg = Gtk.FileChooserDialog(title="Exportar a %s" % kind.upper(), parent=self, action=Gtk.FileChooserAction.SAVE)
-        dlg.add_buttons("_Cancelar", Gtk.ResponseType.CANCEL, "_Guardar", Gtk.ResponseType.ACCEPT)
+        dlg = Gtk.FileChooserDialog(title=T("Exportar a {kind}", kind=kind.upper()), parent=self, action=Gtk.FileChooserAction.SAVE)
+        dlg.add_buttons(T("_Cancelar"), Gtk.ResponseType.CANCEL, T("_Guardar"), Gtk.ResponseType.ACCEPT)
         dlg.set_do_overwrite_confirmation(True)
         dlg.set_current_folder(str(self.md_path.parent))
         dlg.set_current_name(name)
@@ -530,8 +573,8 @@ class MdLive(Gtk.Window):
             if ev == WebKit2.LoadEvent.FINISHED:
                 GLib.timeout_add(400, do_print)   # que asiente la maquetacion (fuentes, svg)
         view.connect("load-changed", on_load)
-        view.connect("load-failed", lambda *_: finish(False, "no se pudo cargar el HTML") or True)
-        GLib.timeout_add(60000, lambda: finish(False, "tiempo agotado al generar el PDF") or False)
+        view.connect("load-failed", lambda *_: finish(False, T("no se pudo cargar el HTML")) or True)
+        GLib.timeout_add(60000, lambda: finish(False, T("tiempo agotado al generar el PDF")) or False)
         view.load_html(html, "app://local/")
 
     # ---- menu contextual: solo "copiar enlace" cuando se pulsa sobre un enlace ----
