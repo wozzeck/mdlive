@@ -192,14 +192,14 @@ body {
 .cm-joinbtn svg { width: 12px; height: 12px; display: block; fill: none; stroke: currentColor;
   stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 /* cajon de edicion de una celda de tabla (clic sobre ella en un bloque renderizado): se pone
-   encima de la celda con su misma tipografia y relleno (los copia el JS) y muestra la FUENTE
-   de la celda con el sombreado de un bloque en fuente. Tab/Intro confirman y pasan a la celda
-   siguiente / de abajo, Esc cancela, clic fuera confirma */
+   encima de la celda con su relleno y tipografia (los copia el JS) y lleva dentro un
+   CodeMirror con el mismo coloreado que el bloque en fuente. Tab/Intro confirman y pasan a la
+   celda siguiente / de abajo, Esc cancela, clic fuera confirma */
 .cm-cell-editor {
   position: absolute; z-index: 60; box-sizing: border-box;
   background: var(--editing-bg); color: var(--fg);
   border: 1px solid var(--link); box-shadow: inset 0 0 0 1px var(--link); outline: none;
-  white-space: pre-wrap; overflow-wrap: break-word; cursor: text;
+  cursor: text;
 }
 #btn-edit.active { background: var(--link); color: #fff; border-color: var(--link); }
 
