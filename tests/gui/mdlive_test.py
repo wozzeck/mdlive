@@ -63,6 +63,9 @@ class App:
         src = pathlib.Path(fixture) if os.path.isabs(str(fixture)) else FIXTURES / fixture
         self.md = self.tmp / src.name
         shutil.copy(src, self.md)
+        assets = src.with_suffix('')   # activos del fixture (imagenes.md + imagenes/): al lado del .md copiado
+        if assets.is_dir():
+            shutil.copytree(assets, self.tmp / assets.name)
         env = dict(os.environ, DISPLAY=DISPLAY, XDG_DATA_HOME=str(self.tmp / "data"), XDG_CACHE_HOME=str(self.tmp / "cache"),
                    XDG_RUNTIME_DIR=str(self.tmp / "run"), MDLIVE_TEST_DIR=str(self.tmp / "cmd"))
         self.log = (self.tmp / "app.log").open("w")

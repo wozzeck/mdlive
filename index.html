@@ -24,6 +24,7 @@
   <button id="btn-pin" title="Fijar el título de la sección al hacer scroll (tecla p)" aria-label="Fijar títulos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></button>
   <button id="btn-search" title="Buscar (Ctrl+F)" aria-label="Buscar"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button>
   <button id="btn-minimap" title="Minimapa del documento (tecla m)" aria-label="Minimapa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></svg></button>
+  <button id="btn-thumbs" title="Imágenes como miniaturas (tecla i)" aria-label="Imágenes como miniaturas"><svg viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></button>
   <button id="btn-recent" title="Documentos recientes (tecla r)" aria-label="Documentos recientes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg></button>
   <button id="btn-edit" title="Modo edición (tecla e)" aria-label="Modo edición"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></button>
 </div>
@@ -56,6 +57,7 @@
 <div id="minimap-resizer" title="Arrastrar para redimensionar el minimapa"></div>
 <div id="minimap-gutter" title="Coincidencias de la búsqueda"></div>
 
+<div id="lightbox" aria-hidden="true" title="Cerrar (Esc)"><img alt=""><div id="lightbox-cap"></div></div>
 <div id="help-overlay" aria-hidden="true">
   <div id="help-modal" role="dialog" aria-modal="true" aria-label="Atajos de teclado">
     <button id="help-close" title="Cerrar (Esc)" aria-label="Cerrar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
@@ -67,6 +69,7 @@
           <tr><td><kbd>t</kbd></td><td>Índice del documento</td></tr>
           <tr><td><kbd>p</kbd></td><td>Fijar títulos (chincheta)</td></tr>
           <tr><td><kbd>m</kbd></td><td>Minimapa del documento</td></tr>
+<tr><td><kbd>i</kbd></td><td>Imágenes como miniaturas (clic: tamaño completo; otro clic: tamaño real; <kbd>←</kbd>/<kbd>→</kbd> pasa de imagen; <kbd>Esc</kbd> cierra)</td></tr>
           <tr><td><kbd>r</kbd></td><td>Documentos recientes</td></tr>
           <tr><td><kbd>e</kbd></td><td>Modo edición</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Buscar (selecciona lo escrito; repetir avanza a la siguiente coincidencia)</td></tr>
@@ -384,6 +387,8 @@
         decorateSync(div);
         if (this.q) highlightInElement(div, this.q);  // resalta ocurrencias en el bloque renderizado
         div.addEventListener('mousedown', (e) => {
+          // miniatura: se abre a tamaño completo (para editar el bloque, clic fuera de la imagen)
+          if (thumbsOn() && e.target.tagName === 'IMG') { e.preventDefault(); e.stopPropagation(); if (e.button === 0) openLightbox(e.target); return; }
           // celda de tabla: se edita en su sitio (Ctrl+clic: la tabla entera a fuente, como el resto;
           // Alt+clic no vale: el gestor de ventanas se lo queda para mover la ventana)
           const cell = e.target.closest && e.target.closest('td, th');
@@ -411,8 +416,8 @@
         return div;
       }
       destroy(dom) { if (sizeObs) sizeObs.unobserve(dom); }
-      // el clic en una celda de tabla no es de CM (lo atiende el mousedown de arriba)
-      ignoreEvent(e) { return !!(e.target && e.target.closest && e.target.closest('td, th')); }
+      // el clic en una celda de tabla o en una miniatura no es de CM (lo atiende el mousedown de arriba)
+      ignoreEvent(e) { return !!(e.target && ((e.target.closest && e.target.closest('td, th')) || (e.target.tagName === 'IMG' && thumbsOn()))); }
     }
     // cache de decoraciones de linea por clase (cm-editing [+ cm-li-gap | cm-edit-hN])
     const _lineDeco = {};
@@ -1402,6 +1407,11 @@
   addEventListener('wheel', (e) => { if (!e.ctrlKey) return; e.preventDefault(); zPending += (e.deltaY < 0 ? 0.1 : -0.1); if (!zScheduled) { zScheduled = true; requestAnimationFrame(flushZoom); } }, { passive: false });
 
   addEventListener('keydown', (e) => {
+    if (lightboxOpen()) {
+      if (e.key === 'Escape') { e.preventDefault(); closeLightbox(); }
+      else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); lightboxStep(e.key === 'ArrowRight' ? 1 : -1); }
+      return;
+    }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'h' || e.key === 'H')) { e.preventDefault(); toggleHelp(); return; }
     if (e.key === 'Escape' && helpOpen()) { e.preventDefault(); setHelp(false); return; }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); focusSearch(e.shiftKey); return; }
@@ -1417,6 +1427,7 @@
     else if (e.key === 't') { e.preventDefault(); toggleToc(); }
     else if (e.key === 'p') { e.preventDefault(); setPin(!pinOn()); }
     else if (e.key === 'm') { e.preventDefault(); toggleMinimap(); }
+    else if (e.key === 'i') { e.preventDefault(); toggleThumbs(); }
     else if (e.key === 'r') { e.preventDefault(); toggleRecent(); }
   });
 
@@ -2252,6 +2263,7 @@
     return dec.startsWith('/') ? dec : resolveAbs(mdDir, dec);      // relativo -> contra dir del .md
   }
   content.addEventListener('click', (e) => {
+    if (thumbsOn() && e.target.tagName === 'IMG') { e.preventDefault(); openLightbox(e.target); return; }
     const a = linkAt(e.target);
     if (!a) return;
     const target = localMdTarget(a.getAttribute('href'));
@@ -2609,7 +2621,71 @@
 
   applyZoom();
   if (localStorage.getItem('mdlive-toc') === '1') { document.body.classList.add('toc-open'); btnToc.classList.add('active'); }
+  // ===== Imágenes como miniaturas + visor a tamaño completo ==================
+  // Con el modo activo (clase thumbs-on en body, CSS) las imágenes del documento salen
+  // pequeñas en visor, edición y minimapa; un clic las abre en #lightbox ajustadas a la
+  // ventana (otro clic: tamaño real con scroll; ←/→ pasa de imagen; Esc o clic fuera cierra).
+  const btnThumbs = document.getElementById('btn-thumbs');
+  const lightbox = document.getElementById('lightbox');
+  const lbImg = lightbox.querySelector('img');
+  const lbCap = document.getElementById('lightbox-cap');
+  let lbList = [], lbIdx = -1;
+  // sonda FUERA del layout para el tamaño intrínseco: en WebKit, naturalWidth/Height de un <img>
+  // SVG ya maquetado devuelven su tamaño actual (el del contenedor), no el del fichero
+  const lbNat = new Image();
+  function lbIntrinsic() { return (lbNat.complete && lbNat.naturalWidth) ? { w: lbNat.naturalWidth, h: lbNat.naturalHeight } : null; }
+  function thumbsOn() { return document.body.classList.contains('thumbs-on'); }
+  function setThumbs(on) {
+    document.body.classList.toggle('thumbs-on', on);
+    btnThumbs.classList.toggle('active', on);
+    localStorage.setItem('mdlive-thumbs', on ? '1' : '0');
+    if (!on) closeLightbox();
+    // cambia el alto de todo: recuadro y marcas del minimapa, gutter, scroll-spy (el editor
+    // CM se entera solo por el ResizeObserver de sus widgets)
+    requestAnimationFrame(() => { updateSpy(); if (minimapOn()) { updateMinimap(); renderMinimapMarks(); } renderGutterMarks(); });
+  }
+  function toggleThumbs() { setThumbs(!thumbsOn()); }
+  btnThumbs.onclick = toggleThumbs;
+  function lightboxOpen() { return document.body.classList.contains('lightbox-open'); }
+  function imgName(img) {
+    if (img.alt || img.title) return img.alt || img.title;
+    let n = (img.getAttribute('src') || '').split('/').pop();
+    try { n = decodeURIComponent(n).split('/').pop(); } catch (_) {}   // app://local/_abs/<ruta codificada>
+    return n;
+  }
+  function lbFit() { lightbox.classList.remove('natural'); lbImg.style.width = lbImg.style.height = ''; }
+  function showLightbox(img) {
+    lbFit();
+    const src = img.currentSrc || img.src;
+    lbImg.src = src; lbImg.alt = img.alt || '';
+    const cap = () => { const n = lbIntrinsic(); lbCap.textContent = (lbList.length > 1 ? (lbIdx + 1) + '/' + lbList.length + ' · ' : '') + imgName(img)
+      + (n ? ' · ' + n.w + '×' + n.h : ''); };
+    lbNat.onload = cap; lbNat.src = src; cap();
+  }
+  function openLightbox(img) {
+    const host = (editMode && cmView) ? editorHost : content;
+    lbList = [...host.querySelectorAll('img')]; lbIdx = lbList.indexOf(img);
+    showLightbox(img);
+    document.body.classList.add('lightbox-open');
+  }
+  function closeLightbox() { document.body.classList.remove('lightbox-open'); lbFit(); }
+  function lightboxStep(d) {
+    if (lbList.length < 2) return;
+    lbIdx = (lbIdx + d + lbList.length) % lbList.length; showLightbox(lbList[lbIdx]);
+  }
+  lightbox.addEventListener('click', (e) => {
+    if (e.target === lbImg) {
+      // sobre la imagen: si está reducida para caber, a tamaño real (y vuelta); si ya cabe, cerrar
+      const natural = lightbox.classList.contains('natural'), n = lbIntrinsic();
+      const fits = !n || (n.w <= lbImg.clientWidth + 1 && n.h <= lbImg.clientHeight + 1);
+      if (!natural && !fits) { lightbox.classList.add('natural'); lbImg.style.width = n.w + 'px'; lbImg.style.height = n.h + 'px'; return; }
+      if (natural) { lbFit(); return; }
+    }
+    closeLightbox();
+  });
+
   if (localStorage.getItem('mdlive-pin') === '1') { document.body.classList.add('pin-on'); btnPin.classList.add('active'); }
+  if (localStorage.getItem('mdlive-thumbs') === '1') { document.body.classList.add('thumbs-on'); btnThumbs.classList.add('active'); }
   if (localStorage.getItem('mdlive-minimap') !== '0') { document.body.classList.add('minimap-on'); btnMinimap.classList.add('active'); }
   if (localStorage.getItem('mdlive-recent') === '1') { document.body.classList.add('recent-open'); btnRecent.classList.add('active'); }
   const savedMmW = parseInt(localStorage.getItem('mdlive-minimap-w'), 10);

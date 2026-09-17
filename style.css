@@ -65,6 +65,15 @@ body {
 .markdown-body a:hover { text-decoration: underline; }
 .markdown-body hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
 .markdown-body img { max-width: 100%; }
+/* miniaturas (tecla i): las imágenes del documento salen pequeñas (también en los widgets
+   del editor y en el clon del minimapa: misma regla, mismas alturas); un clic las abre en #lightbox */
+body.thumbs-on .markdown-body img { max-width: 12rem; max-height: 8rem; width: auto; height: auto; cursor: zoom-in; border-radius: 6px; }
+#lightbox { display: none; position: fixed; inset: 0; z-index: 120; background: rgba(0,0,0,.84); cursor: zoom-out; overflow: auto; }
+body.lightbox-open #lightbox { display: flex; align-items: center; justify-content: center; }
+#lightbox img { display: block; max-width: calc(100vw - 2rem); max-height: calc(100vh - 3.6rem); object-fit: contain; box-shadow: 0 10px 44px rgba(0,0,0,.5); cursor: zoom-in; }
+#lightbox.natural { display: block; padding: 1rem 1rem 2.6rem; }
+#lightbox.natural img { max-width: none; max-height: none; margin: 0 auto; cursor: zoom-out; }
+#lightbox-cap { position: fixed; left: 0; right: 0; bottom: 0; padding: .45rem 1rem; text-align: center; font-size: 13px; color: #e6e6e6; text-shadow: 0 1px 2px rgba(0,0,0,.8); pointer-events: none; }
 
 /* ---- listas ---- */
 .markdown-body ul, .markdown-body ol { padding-left: 1.6em; }
