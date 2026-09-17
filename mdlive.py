@@ -16,6 +16,7 @@ import time
 import pathlib
 import subprocess
 import urllib.parse
+import gettext
 import gi
 
 gi.require_version("Gtk", "3.0")
@@ -221,6 +222,8 @@ class MdLive(Gtk.Window):
         self.ucm.connect("script-message-received::mdliveCopy", self.on_copy_message)
         self.ucm.register_script_message_handler("mdliveForget")
         self.ucm.connect("script-message-received::mdliveForget", self.on_forget_message)
+        self.ucm.register_script_message_handler("mdliveExport")
+        self.ucm.connect("script-message-received::mdliveExport", self.on_export_message)
 
         self.webview = WebKit2.WebView.new_with_user_content_manager(self.ucm)
         st = self.webview.get_settings()
@@ -415,6 +418,121 @@ class MdLive(Gtk.Window):
             return pathlib.Path(p).read_bytes()
         except OSError:
             return fallback
+
+    # ---- exportar: HTML autocontenido (fichero) o PDF (impresion de ese HTML en una vista aparte) ----
+    def on_export_message(self, ucm, js_result):
+        try:
+            payload = json.loads(js_result.get_js_value().to_string())
+        except Exception:
+            return
+        kind, html = payload.get("kind"), payload.get("html") or ""
+        if kind not in ("html", "pdf"):
+            return
+        name = payload.get("name") or (self.md_path.stem + "." + kind)
+        path = payload.get("path") if TEST_DIR else None   # canal de pruebas: sin dialogo
+        if not path:
+            path = self._save_dialog(name, kind)
+            if not path:
+                self._exported({"ok": False, "cancelled": True})
+                return
+        if kind == "html":
+            try:
+                pathlib.Path(path).write_text(html, encoding="utf-8")
+                self._exported({"ok": True, "path": path})
+            except OSError as e:
+                self._exported({"ok": False, "error": str(e)})
+        else:
+            self._print_pdf(html, path)
+
+    def _save_dialog(self, name, kind):
+        dlg = Gtk.FileChooserDialog(title="Exportar a %s" % kind.upper(), parent=self, action=Gtk.FileChooserAction.SAVE)
+        dlg.add_buttons("_Cancelar", Gtk.ResponseType.CANCEL, "_Guardar", Gtk.ResponseType.ACCEPT)
+        dlg.set_do_overwrite_confirmation(True)
+        dlg.set_current_folder(str(self.md_path.parent))
+        dlg.set_current_name(name)
+        flt = Gtk.FileFilter()
+        flt.set_name("PDF" if kind == "pdf" else "HTML")
+        flt.add_pattern("*." + kind)
+        dlg.add_filter(flt)
+        target = dlg.get_filename() if dlg.run() == Gtk.ResponseType.ACCEPT else None
+        dlg.destroy()
+        if target and not target.lower().endswith("." + kind):
+            target += "." + kind
+        return target
+
+    def _exported(self, info):
+        js = "window.__mdlive && window.__mdlive.exported && window.__mdlive.exported(%s)" % json.dumps(info, ensure_ascii=False)
+        try:
+            self.webview.run_javascript(js, None, None, None)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _file_printer_name():
+        """Nombre de la impresora 'a fichero' de GTK: esta traducido (es: 'Imprimir a un archivo'),
+        asi que se pide a gettext y, si se puede, se confirma enumerando las impresoras."""
+        name = gettext.dgettext("gtk30", "Print to File")
+        found = []
+
+        def cb(printer, *_):
+            try:
+                if "File" in type(printer.get_backend()).__name__ or "File" in printer.get_backend().__gtype__.name:
+                    found.append(printer.get_name())
+                    return True
+            except Exception:
+                pass
+            return False
+        try:
+            Gtk.enumerate_printers(cb, None, None, True)
+        except Exception:
+            pass
+        return found[0] if found else name
+
+    def _print_pdf(self, html, path):
+        """Carga el HTML autocontenido en una vista fuera de pantalla y, al terminar, lo imprime a
+        PDF sin dialogo (impresora 'a fichero' de GTK, A4)."""
+        win = Gtk.OffscreenWindow()
+        view = WebKit2.WebView()
+        view.set_size_request(1000, 800)
+        win.add(view)
+        win.show_all()
+        state = {"done": False}
+
+        def finish(ok, error=None):
+            if state["done"]:
+                return
+            state["done"] = True
+            info = {"ok": ok, "path": path}
+            if error:
+                info["error"] = error
+            self._exported(info)
+            GLib.timeout_add(800, lambda: (win.destroy(), False)[1])
+
+        def do_print():
+            try:
+                po = WebKit2.PrintOperation.new(view)
+                ps = Gtk.PrintSettings()
+                ps.set_printer(self._file_printer_name())
+                ps.set(Gtk.PRINT_SETTINGS_OUTPUT_URI, pathlib.Path(path).resolve().as_uri())
+                ps.set(Gtk.PRINT_SETTINGS_OUTPUT_FILE_FORMAT, "pdf")
+                po.set_print_settings(ps)
+                setup = Gtk.PageSetup()
+                setup.set_paper_size_and_default_margins(Gtk.PaperSize.new(Gtk.PAPER_NAME_A4))
+                po.set_page_setup(setup)
+                po.connect("finished", lambda *_: finish(True))
+                po.connect("failed", lambda _po, err: finish(False, getattr(err, "message", str(err))))
+                po.print_()
+            except Exception as e:
+                finish(False, str(e))
+            return False
+
+        def on_load(v, ev):
+            if ev == WebKit2.LoadEvent.FINISHED:
+                GLib.timeout_add(400, do_print)   # que asiente la maquetacion (fuentes, svg)
+        view.connect("load-changed", on_load)
+        view.connect("load-failed", lambda *_: finish(False, "no se pudo cargar el HTML") or True)
+        GLib.timeout_add(60000, lambda: finish(False, "tiempo agotado al generar el PDF") or False)
+        view.load_html(html, "app://local/")
 
     # ---- menu contextual: solo "copiar enlace" cuando se pulsa sobre un enlace ----
     def on_context_menu(self, webview, context_menu, event, hit_test_result):

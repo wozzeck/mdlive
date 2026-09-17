@@ -236,23 +236,23 @@ body.lightbox-open #lightbox { display: flex; align-items: center; justify-conte
 .cm-table-tools button:disabled { opacity: .35; cursor: default; }
 .cm-table-tools button[aria-pressed="true"] { color: var(--link); background: var(--alt-bg); }
 .cm-table-tools .sep { width: 1px; height: 16px; background: var(--border); margin: 0 3px; }
-.cm-table-tools svg, .cm-ctxmenu svg {
+.cm-table-tools svg, .cm-ctxmenu svg, #export-menu svg {
   width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor;
   stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
 }
 /* menu contextual propio de las tablas (clic derecho en una celda; el nativo lo suprime mdlive.py) */
-.cm-ctxmenu {
+.cm-ctxmenu, #export-menu {
   position: fixed; z-index: 80; display: none; min-width: 260px; padding: 4px;
   background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 8px 28px rgba(0,0,0,.22);
   font-family: var(--font-body); font-size: 13px; line-height: 1.4; user-select: none;
 }
-.cm-ctxmenu .item { display: flex; align-items: center; gap: .6em; padding: .3em .7em .3em .6em; border-radius: 5px; cursor: pointer; }
+.cm-ctxmenu .item, #export-menu .item { display: flex; align-items: center; gap: .6em; padding: .3em .7em .3em .6em; border-radius: 5px; cursor: pointer; }
 .cm-ctxmenu .item.sel { background: var(--alt-bg); color: var(--link); }
 .cm-ctxmenu .item.off { opacity: .4; cursor: default; }
 .cm-ctxmenu .item.on .lbl { color: var(--link); font-weight: 600; }   /* alineacion actual de la columna */
 .cm-ctxmenu .item .k { margin-left: auto; padding-left: 1.4em; color: var(--muted); font-size: 11px; }
-.cm-ctxmenu .sep { height: 1px; margin: 4px 6px; background: var(--border); }
+.cm-ctxmenu .sep, #export-menu .sep { height: 1px; margin: 4px 6px; background: var(--border); }
 #btn-edit.active { background: var(--link); color: #fff; border-color: var(--link); }
 
 /* === Título de sección fijado (chincheta) ================================ */
@@ -567,3 +567,39 @@ body:not(.minimap-on):not(.edit-mode) #minimap-gutter.show {
    solo la chincheta (barra de contenido) se acorta para no solaparse */
 body.minimap-on #pin-bar { right: var(--minimap-w); }
 #btn-minimap.active { background: var(--link); color: #fff; border-color: var(--link); }
+
+/* === Exportar: menú, popup de texto, aviso ================================== */
+#export-menu .hdr { padding: .3em .7em .4em; color: var(--muted); font-size: 12px; }
+#export-menu .item:hover { background: var(--alt-bg); color: var(--link); }
+#export-overlay { display: none; position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.4); }
+body.export-open #export-overlay { display: flex; align-items: center; justify-content: center; }
+#export-modal {
+  position: relative; display: flex; flex-direction: column; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 44px rgba(0,0,0,.32);
+  padding: 1.3rem 1.6rem 1.4rem; width: min(980px, calc(100% - 4rem)); max-height: calc(100% - 4rem);
+}
+#export-modal h2 { margin: 0 2rem .35rem 0; font-size: 1.15em; font-weight: 700; }
+#export-hint { margin: 0 0 .8rem; color: var(--muted); font-size: 13.5px; }
+#export-text {
+  flex: 1 1 auto; width: 100%; min-height: 200px; height: 52vh; resize: vertical; box-sizing: border-box;
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.45; padding: .6rem .7rem; white-space: pre;
+  color: var(--fg); background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; outline: none;
+}
+#export-text:focus { border-color: var(--link); }
+.export-actions { display: flex; align-items: center; gap: .6rem; margin-top: .8rem; flex-wrap: wrap; }
+.export-actions .btn { font: inherit; font-size: 13.5px; padding: .4em .9em; border: 1px solid var(--border); border-radius: 6px; background: var(--alt-bg); color: var(--fg); cursor: pointer; }
+.export-actions .btn:hover { border-color: var(--link); color: var(--link); }
+#export-status { color: var(--muted); font-size: 13px; }
+#export-close {
+  position: absolute; top: .55rem; right: .75rem; border: 0; background: transparent;
+  color: var(--muted); line-height: 1; cursor: pointer; padding: .2rem;
+  display: flex; align-items: center; justify-content: center;
+}
+#export-close svg { width: 18px; height: 18px; display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#export-close:hover { color: var(--fg); }
+#toast {
+  position: fixed; left: 50%; bottom: 1.6rem; z-index: 130; max-width: min(760px, calc(100% - 2rem)); padding: .55rem 1rem;
+  border-radius: 8px; background: var(--fg); color: var(--bg); font-size: 13.5px; box-shadow: 0 8px 28px rgba(0,0,0,.3);
+  opacity: 0; transform: translate(-50%, 16px); pointer-events: none; transition: opacity .18s, transform .18s; word-break: break-all;
+}
+#toast.show { opacity: 1; transform: translate(-50%, 0); }

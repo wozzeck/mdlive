@@ -25,6 +25,7 @@
   <button id="btn-search" title="Buscar (Ctrl+F)" aria-label="Buscar"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button>
   <button id="btn-minimap" title="Minimapa del documento (tecla m)" aria-label="Minimapa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></svg></button>
   <button id="btn-thumbs" title="Imágenes como miniaturas (tecla i)" aria-label="Imágenes como miniaturas"><svg viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></button>
+  <button id="btn-export" title="Exportar: PDF, HTML, Jira, Confluence, Slack, Teams (tecla x)" aria-label="Exportar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg></button>
   <button id="btn-recent" title="Documentos recientes (tecla r)" aria-label="Documentos recientes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg></button>
   <button id="btn-edit" title="Modo edición (tecla e)" aria-label="Modo edición"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></button>
 </div>
@@ -57,6 +58,26 @@
 <div id="minimap-resizer" title="Arrastrar para redimensionar el minimapa"></div>
 <div id="minimap-gutter" title="Coincidencias de la búsqueda"></div>
 
+<div id="export-menu" role="menu" aria-label="Exportar">
+  <div class="hdr">Exportar todo el documento</div>
+  <div class="item" data-kind="pdf">PDF…</div>
+  <div class="item" data-kind="html">HTML autocontenido…</div>
+  <div class="sep"></div>
+  <div class="item" data-kind="jira">Jira (wiki markup)</div>
+  <div class="item" data-kind="confluence">Confluence (storage format)</div>
+  <div class="item" data-kind="slack">Slack</div>
+  <div class="item" data-kind="teams">Teams</div>
+</div>
+<div id="export-overlay" aria-hidden="true">
+  <div id="export-modal" role="dialog" aria-modal="true" aria-labelledby="export-title">
+    <button id="export-close" title="Cerrar (Esc)" aria-label="Cerrar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+    <h2 id="export-title">Exportar</h2>
+    <p id="export-hint"></p>
+    <textarea id="export-text" readonly spellcheck="false" wrap="off"></textarea>
+    <div class="export-actions"><button id="export-copy" class="btn">Copiar texto</button><button id="export-copy-rich" class="btn">Copiar con formato</button><span id="export-status"></span></div>
+  </div>
+</div>
+<div id="toast" aria-live="polite"></div>
 <div id="lightbox" aria-hidden="true" title="Cerrar (Esc)"><img alt=""><div id="lightbox-cap"></div></div>
 <div id="help-overlay" aria-hidden="true">
   <div id="help-modal" role="dialog" aria-modal="true" aria-label="Atajos de teclado">
@@ -70,6 +91,7 @@
           <tr><td><kbd>p</kbd></td><td>Fijar títulos (chincheta)</td></tr>
           <tr><td><kbd>m</kbd></td><td>Minimapa del documento</td></tr>
 <tr><td><kbd>i</kbd></td><td>Imágenes como miniaturas (clic: tamaño completo; otro clic: tamaño real; <kbd>←</kbd>/<kbd>→</kbd> pasa de imagen; <kbd>Esc</kbd> cierra)</td></tr>
+<tr><td><kbd>x</kbd></td><td>Exportar: PDF, HTML autocontenido, Jira, Confluence, Slack o Teams (con algo seleccionado, solo la selección)</td></tr>
           <tr><td><kbd>r</kbd></td><td>Documentos recientes</td></tr>
           <tr><td><kbd>e</kbd></td><td>Modo edición</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Buscar (selecciona lo escrito; repetir avanza a la siguiente coincidencia)</td></tr>
@@ -125,9 +147,11 @@
   };
   // lineas de origen en los bloques del lienzo del minimapa (data-line = primera linea del
   // bloque, 0-based): solo cuando se renderiza con env.mmLines; el visor y los widgets no lo usan
+  // cada bloque lleva sus lineas del .md: data-line (primera) y data-lend (siguiente a la ultima).
+  // Las usan el minimapa (anclas del clon) y exportar (seleccion del visor -> lineas). En los
+  // widgets del editor son relativas a la unidad (no se usan).
   md.core.ruler.push('mdlive_lines', (state) => {
-    if (!state.env || !state.env.mmLines) return true;
-    for (const t of state.tokens) if (t.block && t.map && t.nesting >= 0 && !t.hidden && t.type !== 'html_block') t.attrSet('data-line', String(t.map[0]));
+    for (const t of state.tokens) if (t.block && t.map && t.nesting >= 0 && !t.hidden && t.type !== 'html_block') { t.attrSet('data-line', String(t.map[0])); t.attrSet('data-lend', String(t.map[1])); }
     return true;
   });
 
@@ -153,6 +177,7 @@
       const div = document.createElement('div');
       div.className = 'mermaid';
       div.textContent = c.textContent;
+      for (const a of ['data-line', 'data-lend']) if (c.hasAttribute(a)) div.setAttribute(a, c.getAttribute(a));
       host.replaceWith(div);
     });
   }
@@ -1412,6 +1437,8 @@
       else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); lightboxStep(e.key === 'ArrowRight' ? 1 : -1); }
       return;
     }
+    if (exportModalOpen()) { if (e.key === 'Escape') { e.preventDefault(); closeExportModal(); } return; }
+    if (exportMenuOpen() && e.key === 'Escape') { e.preventDefault(); closeExportMenu(); return; }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'h' || e.key === 'H')) { e.preventDefault(); toggleHelp(); return; }
     if (e.key === 'Escape' && helpOpen()) { e.preventDefault(); setHelp(false); return; }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); focusSearch(e.shiftKey); return; }
@@ -1428,6 +1455,7 @@
     else if (e.key === 'p') { e.preventDefault(); setPin(!pinOn()); }
     else if (e.key === 'm') { e.preventDefault(); toggleMinimap(); }
     else if (e.key === 'i') { e.preventDefault(); toggleThumbs(); }
+    else if (e.key === 'x') { e.preventDefault(); toggleExportMenu(); }
     else if (e.key === 'r') { e.preventDefault(); toggleRecent(); }
   });
 
@@ -2684,6 +2712,380 @@
     closeLightbox();
   });
 
+  // @test-begin export
+  // ===== Exportar a texto: Jira (wiki markup), Confluence (storage format XHTML), Slack (mrkdwn)
+  // y Teams (el markdown que entiende su cuadro de mensaje). Recorre los tokens de markdown-it y
+  // deja a cada dialecto solo la sintaxis: titulos, parrafos, enfasis, codigo, enlaces, imagenes,
+  // listas anidadas (con tareas), citas, tablas (con alineacion), reglas, saltos de linea.
+  const escXml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const isHttp = (u) => /^https?:\/\//i.test(u || '');
+  const baseName = (u) => { const n = (u || '').split(/[?#]/)[0].split('/').pop(); try { return decodeURIComponent(n); } catch (_) { return n; } };
+  // tabla en texto monoespaciado (chats): columnas alineadas a lo ancho
+  function textTable(rows, align) {
+    const n = Math.max(...rows.map((r) => r.length));
+    const w = []; for (let c = 0; c < n; c++) w.push(Math.max(1, ...rows.map((r) => strWidth(r[c] || ''))));
+    const pad = (t, c) => { const k = w[c] - strWidth(t), a = align[c]; if (a === 'r') return ' '.repeat(k) + t; if (a === 'c') return ' '.repeat(Math.floor(k / 2)) + t + ' '.repeat(k - Math.floor(k / 2)); return t + ' '.repeat(k); };
+    const line = (r) => Array.from({ length: n }, (_, c) => pad(r[c] || '', c)).join('  ').replace(/\s+$/, '');
+    return [line(rows[0]), w.map((x) => '-'.repeat(x)).join('  '), ...rows.slice(1).map(line)].join('\n');
+  }
+  // lista en texto (chats): marca por nivel, sangria, tareas con casilla, continuaciones alineadas
+  function textList(items, path, ind, bullet) {
+    const pre = ind.repeat(path.length - 1), ordered = path[path.length - 1];
+    return items.map((it) => {
+      const mark = ordered ? it.n + '. ' : bullet, cont = pre + ' '.repeat(mark.length);
+      const lines = []; let first = true;
+      for (const q of it.parts) {
+        if (q.text !== undefined) { lines.push((first ? pre + mark + (it.task ? (it.checked ? '☑ ' : '☐ ') : '') : cont) + q.text); first = false; }
+        else if (q.list !== undefined) lines.push(q.list);
+        else if (q.block !== undefined) lines.push(q.block.split('\n').map((l) => cont + l).join('\n'));
+      }
+      if (first) lines.unshift(pre + mark.trimEnd());
+      return lines.join('\n');
+    }).join('\n');
+  }
+  const textQuote = (inner) => inner.join('\n\n').split('\n').map((l) => '> ' + l).join('\n');
+  const CONFLUENCE_LANG = { js: 'javascript', ts: 'javascript', jsx: 'javascript', tsx: 'javascript', json: 'javascript', py: 'python', sh: 'bash', shell: 'bash', zsh: 'bash', console: 'bash', yml: 'yaml', xml: 'html/xml', html: 'html/xml', svg: 'html/xml', cs: 'csharp', c: 'cpp', 'c++': 'cpp', h: 'cpp', rb: 'ruby', ps1: 'powershell', txt: 'none', text: 'none', plain: 'none', mermaid: 'none', md: 'none', markdown: 'none' };
+  // cuerpo de un item de lista en XHTML: varios parrafos o bloques -> <p>; un solo texto -> suelto
+  const xmlItemBody = (it) => { const multi = it.parts.filter((q) => q.text !== undefined).length > 1 || it.parts.some((q) => q.block !== undefined); return it.parts.map((q) => q.text !== undefined ? (multi ? '<p>' + q.text + '</p>' : q.text) : (q.list !== undefined ? q.list : q.block)).join(''); };
+  const EXPORT_DIALECTS = {
+    jira: {
+      join: '\n\n', softbreak: ' ', br: '\\\\\n', esc: (t) => t.replace(/[{[]/g, (m) => '\\' + m),
+      heading: (l, t) => 'h' + l + '. ' + t, para: (t) => t,
+      strong: (t) => '*' + t + '*', em: (t) => '_' + t + '_', del: (t) => '-' + t + '-', code: (t) => '{{' + t + '}}',
+      link: (t, u) => (t && t !== u) ? '[' + t + '|' + u + ']' : '[' + u + ']',
+      image: (alt, u) => '!' + u + (alt ? '|alt=' + alt : '') + '!',
+      html: (h) => h, hr: '----',
+      fence: (lang, code) => '{code' + (lang ? ':' + lang : '') + '}\n' + code + '\n{code}',
+      quote: (inner) => '{quote}\n' + inner.join('\n\n') + '\n{quote}',
+      list: (items, path) => {
+        const mark = path.map((o) => (o ? '#' : '*')).join('') + ' ';
+        return items.map((it) => {
+          const lines = []; let first = true;
+          for (const q of it.parts) {
+            if (q.text !== undefined) { lines.push((first ? mark + (it.task ? (it.checked ? '(/) ' : '(x) ') : '') : '') + q.text); first = false; }
+            else if (q.list !== undefined) lines.push(q.list);
+            else if (q.block !== undefined) lines.push(q.block);
+          }
+          if (first) lines.unshift(mark.trimEnd());
+          return lines.join('\n');
+        }).join('\n');
+      },
+      table: (rows) => rows.map((r, i) => { const cells = r.map((c) => (c.replace(/\|/g, '¦').trim() || ' ')); return i === 0 ? '||' + cells.join('||') + '||' : '|' + cells.join('|') + '|'; }).join('\n'),
+    },
+    slack: {
+      join: '\n\n', softbreak: ' ', br: '\n', esc: (t) => t,
+      heading: (l, t) => '*' + t + '*', para: (t) => t,
+      strong: (t) => '*' + t + '*', em: (t) => '_' + t + '_', del: (t) => '~' + t + '~', code: (t) => '`' + t + '`',
+      link: (t, u) => (t && t !== u) ? '<' + u + '|' + t + '>' : '<' + u + '>',
+      image: (alt, u) => isHttp(u) ? (alt ? '<' + u + '|' + alt + '>' : '<' + u + '>') : '[' + (alt || baseName(u)) + ']',
+      html: () => '', hr: '———',
+      fence: (lang, code) => '```\n' + code + '\n```',
+      quote: textQuote,
+      list: (items, path) => textList(items, path, '    ', '• '),
+      table: (rows, align) => '```\n' + textTable(rows, align) + '\n```',
+    },
+    teams: {
+      join: '\n\n', softbreak: ' ', br: '\n', esc: (t) => t,
+      heading: (l, t) => '**' + t + '**', para: (t) => t,
+      strong: (t) => '**' + t + '**', em: (t) => '_' + t + '_', del: (t) => '~~' + t + '~~', code: (t) => '`' + t + '`',
+      link: (t, u) => (t && t !== u) ? t + ' (' + u + ')' : u,
+      image: (alt, u) => isHttp(u) ? (alt ? alt + ' (' + u + ')' : u) : '[' + (alt || baseName(u)) + ']',
+      html: () => '', hr: '———',
+      fence: (lang, code) => '```' + (lang || '') + '\n' + code + '\n```',
+      quote: textQuote,
+      list: (items, path) => textList(items, path, '  ', '- '),
+      table: (rows, align) => '```\n' + textTable(rows, align) + '\n```',
+    },
+    confluence: {
+      join: '\n', softbreak: ' ', br: '<br />', esc: escXml,
+      heading: (l, t) => '<h' + l + '>' + t + '</h' + l + '>', para: (t) => '<p>' + t + '</p>',
+      strong: (t) => '<strong>' + t + '</strong>', em: (t) => '<em>' + t + '</em>', del: (t) => '<span style="text-decoration: line-through;">' + t + '</span>', code: (t) => '<code>' + escXml(t) + '</code>',
+      link: (t, u) => '<a href="' + escXml(u) + '">' + (t || escXml(u)) + '</a>',
+      image: (alt, u) => '<ac:image' + (alt ? ' ac:alt="' + escXml(alt) + '"' : '') + '>' + (isHttp(u) ? '<ri:url ri:value="' + escXml(u) + '" />' : '<ri:attachment ri:filename="' + escXml(baseName(u)) + '" />') + '</ac:image>',
+      html: (h) => h, hr: '<hr />',
+      fence: (lang, code) => { const L = CONFLUENCE_LANG[(lang || '').toLowerCase()] || (lang || '').toLowerCase(); return '<ac:structured-macro ac:name="code">' + (L && L !== 'none' ? '<ac:parameter ac:name="language">' + escXml(L) + '</ac:parameter>' : '') + '<ac:plain-text-body><![CDATA[' + code.replace(/]]>/g, ']]]]><![CDATA[>') + ']]></ac:plain-text-body></ac:structured-macro>'; },
+      quote: (inner) => '<blockquote>' + inner.join('') + '</blockquote>',
+      list: (items, path) => {
+        if (items.length && items.every((it) => it.task)) return '<ac:task-list>' + items.map((it) => '<ac:task><ac:task-status>' + (it.checked ? 'complete' : 'incomplete') + '</ac:task-status><ac:task-body>' + xmlItemBody(it) + '</ac:task-body></ac:task>').join('') + '</ac:task-list>';
+        const tag = path[path.length - 1] ? 'ol' : 'ul';
+        return '<' + tag + '>' + items.map((it) => '<li>' + (it.task ? (it.checked ? '☑ ' : '☐ ') : '') + xmlItemBody(it) + '</li>').join('') + '</' + tag + '>';
+      },
+      table: (rows, align) => '<table><tbody>' + rows.map((r, i) => '<tr>' + r.map((c, k) => { const tag = i === 0 ? 'th' : 'td', st = align[k] === 'r' ? ' style="text-align: right;"' : align[k] === 'c' ? ' style="text-align: center;"' : ''; return '<' + tag + st + '>' + c + '</' + tag + '>'; }).join('') + '</tr>').join('') + '</tbody></table>',
+    },
+  };
+  // inline: texto, enfasis anidado, codigo, enlaces, imagenes, saltos; fuera la casilla de tarea del plugin
+  function renderInline(children, D) {
+    let out = '';
+    for (let k = 0; k < children.length; k++) {
+      const c = children[k];
+      switch (c.type) {
+        case 'text': out += D.esc(c.content); break;
+        case 'softbreak': out += D.softbreak; break;
+        case 'hardbreak': out += D.br; break;
+        case 'code_inline': out += D.code(c.content); break;
+        case 'strong_open': case 'em_open': case 's_open': {
+          const close = c.type.replace('_open', '_close');
+          let depth = 1, j = k + 1;
+          for (; j < children.length; j++) { if (children[j].type === c.type) depth++; else if (children[j].type === close && --depth === 0) break; }
+          const inner = renderInline(children.slice(k + 1, j), D);
+          out += (c.type === 'strong_open' ? D.strong : c.type === 'em_open' ? D.em : D.del)(inner);
+          k = j; break;
+        }
+        case 'link_open': {
+          let j = k + 1;
+          for (; j < children.length && children[j].type !== 'link_close'; j++);
+          out += D.link(renderInline(children.slice(k + 1, j), D), c.attrGet('href') || '');
+          k = j; break;
+        }
+        case 'image': out += D.image(c.content, c.attrGet('src') || ''); break;
+        case 'html_inline': if (!/^<(input|\/?label)\b/i.test(c.content)) out += D.html(c.content); break;
+        default: break;
+      }
+    }
+    return out;
+  }
+  function exportText(src, target) {
+    const D = EXPORT_DIALECTS[target];
+    if (!D) throw new Error('destino desconocido: ' + target);
+    const tokens = md.parse(src, {});
+    let i = 0;
+    const inline = (tok) => renderInline((tok && tok.children) || [], D);
+    const fence = (t) => D.fence(t.type === 'fence' ? (t.info || '').trim().split(/\s+/)[0] : '', t.content.replace(/\n$/, ''));
+    // bloques hasta el token de cierre `stop` (que consume); cadenas ya en el dialecto
+    function blocks(stop) {
+      const res = [];
+      while (i < tokens.length) {
+        const t = tokens[i++];
+        if (stop && t.type === stop) return res;
+        const b = block(t);
+        if (b) res.push(b);
+      }
+      return res;
+    }
+    // un bloque a partir de su token de apertura (ya consumido); '' si no produce salida
+    function block(t) {
+      switch (t.type) {
+        case 'heading_open': { const inl = tokens[i]; i += 2; return D.heading(+t.tag.slice(1), inline(inl)); }
+        case 'paragraph_open': { const inl = tokens[i]; i += 2; return D.para(inline(inl)); }
+        case 'fence': case 'code_block': return fence(t);
+        case 'hr': return D.hr;
+        case 'html_block': return D.html(t.content.replace(/\n$/, ''));
+        case 'blockquote_open': return D.quote(blocks('blockquote_close'));
+        case 'bullet_list_open': case 'ordered_list_open': return list(t, []);
+        case 'table_open': return table();
+        default: return '';
+      }
+    }
+    // path: [ordenada?, ...] de fuera a dentro (la profundidad es su longitud)
+    function list(open, parentPath) {
+      const ordered = open.type === 'ordered_list_open', path = parentPath.concat(ordered);
+      const close = ordered ? 'ordered_list_close' : 'bullet_list_close';
+      const items = []; let n = ordered ? (parseInt(open.attrGet('start'), 10) || 1) : 1;
+      while (i < tokens.length && tokens[i].type !== close) {
+        const li = tokens[i++];
+        if (li.type !== 'list_item_open') continue;
+        const it = { parts: [], task: /task-list-item/.test(li.attrGet('class') || ''), checked: false, n: n++ };
+        while (i < tokens.length && tokens[i].type !== 'list_item_close') {
+          const t = tokens[i++];
+          if (t.type === 'paragraph_open') {
+            const inl = tokens[i]; i += 2;
+            const first = it.task && !it.parts.length;   // el plugin quita "[ ] " pero deja el espacio inicial
+            if (first) { const cb = (inl.children || []).find((c) => c.type === 'html_inline' && /task-list-item-checkbox/.test(c.content)); it.checked = !!(cb && /\bchecked\b/.test(cb.content)); }
+            const txt = inline(inl);
+            it.parts.push({ text: first ? txt.replace(/^\s+/, '') : txt });
+          } else if (t.type === 'bullet_list_open' || t.type === 'ordered_list_open') it.parts.push({ list: list(t, path) });
+          else { const b = block(t); if (b) it.parts.push({ block: b }); }
+        }
+        i++;   // list_item_close
+        items.push(it);
+      }
+      i++;   // cierre de la lista
+      return D.list(items, path);
+    }
+    function table() {
+      const rows = [], align = [];
+      while (i < tokens.length && tokens[i].type !== 'table_close') {
+        const t = tokens[i++];
+        if (t.type !== 'tr_open') continue;
+        const row = [];
+        while (i < tokens.length && tokens[i].type !== 'tr_close') {
+          const c = tokens[i++];
+          if (c.type !== 'th_open' && c.type !== 'td_open') continue;
+          if (c.type === 'th_open') { const st = c.attrGet('style') || ''; align.push(/right/.test(st) ? 'r' : /center/.test(st) ? 'c' : 'l'); }
+          row.push(inline(tokens[i])); i += 2;   // inline + cierre de la celda
+        }
+        i++;   // tr_close
+        rows.push(row);
+      }
+      i++;   // table_close
+      return D.table(rows, align);
+    }
+    return blocks(null).join(D.join);
+  }
+  // @test-end
+
+  // ===== Exportar: menu, seleccion, HTML autocontenido / PDF, popup de texto ===================
+  const btnExport = document.getElementById('btn-export');
+  const exportMenu = document.getElementById('export-menu');
+  const exportOverlay = document.getElementById('export-overlay');
+  const exportTitleEl = document.getElementById('export-title'), exportHint = document.getElementById('export-hint');
+  const exportArea = document.getElementById('export-text'), exportStatus = document.getElementById('export-status');
+  const toastEl = document.getElementById('toast');
+  let toastTimer = 0;
+  function toast(msg, ms) { toastEl.textContent = msg; toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.classList.remove('show'), ms || 3500); }
+  // Rango de lineas [a, b) que se exporta: la seleccion ampliada a bloques enteros (visor: hijos de
+  // #content con data-line/data-lend; edicion: unidades de CM), o todo el documento si no hay.
+  function exportRange() {
+    const total = docSource.split('\n').length, all = { a: 0, b: total, all: true };
+    if (editMode && cmView) {
+      const sel = cmView.state.selection.main;
+      if (sel.empty) return all;
+      const doc = cmView.state.doc, blocks = blocksOf(cmView.state);
+      const b0 = blocks.find((k) => sel.from <= k.to);
+      let b1 = null; for (const k of blocks) if (k.from < sel.to || (k.from === sel.to && !b1)) b1 = k;
+      if (!b0 || !b1) return all;
+      if (b1.from === sel.to && b1 !== b0) { const j = blocks.indexOf(b1); if (j > 0) b1 = blocks[j - 1]; }
+      return { a: doc.lineAt(b0.from).number - 1, b: doc.lineAt(b1.to).number, all: false };
+    }
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return all;
+    const r = sel.getRangeAt(0);
+    const top = (n) => { let el = n && (n.nodeType === 1 ? n : n.parentElement); if (!el || el === content || !content.contains(el)) return null; while (el.parentElement !== content) el = el.parentElement; return el; };
+    const lineOf = (el, end) => { const src = el.matches('[data-line]') ? el : el.querySelector('[data-line]'); const v = src && parseInt(src.getAttribute(end ? 'data-lend' : 'data-line'), 10); return (src && !isNaN(v)) ? v : null; };
+    const e0 = top(r.startContainer), e1 = top(r.endContainer);
+    if (!e0 || !e1) return all;
+    const a = lineOf(e0, false), b = lineOf(e1, true);
+    if (a === null || b === null || b <= a) return all;
+    return { a, b, all: false };
+  }
+  const scopeLabel = (rg) => rg.all ? 'todo el documento' : 'la selección (líneas ' + (rg.a + 1) + '–' + rg.b + ')';
+  function exportMenuOpen() { return exportMenu.style.display === 'block'; }
+  function openExportMenu() {
+    const rg = exportRange();
+    exportMenu.querySelector('.hdr').textContent = 'Exportar ' + scopeLabel(rg);
+    exportMenu.dataset.a = rg.a; exportMenu.dataset.b = rg.b; exportMenu.dataset.all = rg.all ? '1' : '0';
+    const r = btnExport.getBoundingClientRect();
+    exportMenu.style.display = 'block';
+    exportMenu.style.left = Math.max(8, r.left - exportMenu.offsetWidth - 6) + 'px';
+    exportMenu.style.top = Math.max(8, Math.min(innerHeight - exportMenu.offsetHeight - 8, r.top)) + 'px';
+    setTimeout(() => document.addEventListener('mousedown', onExportDocDown), 0);
+  }
+  function closeExportMenu() { exportMenu.style.display = 'none'; document.removeEventListener('mousedown', onExportDocDown); }
+  function onExportDocDown(e) { if (!exportMenu.contains(e.target) && e.target !== btnExport && !btnExport.contains(e.target)) closeExportMenu(); }
+  function toggleExportMenu() { if (exportMenuOpen()) closeExportMenu(); else openExportMenu(); }
+  btnExport.addEventListener('mousedown', (e) => e.preventDefault());   // no robar el foco ni la seleccion
+  btnExport.onclick = toggleExportMenu;
+  exportMenu.addEventListener('click', (e) => {
+    const it = e.target.closest('.item'); if (!it) return;
+    const rg = { a: +exportMenu.dataset.a, b: +exportMenu.dataset.b, all: exportMenu.dataset.all === '1' };
+    closeExportMenu();
+    runExport(it.dataset.kind, rg);
+  });
+  async function docName() { try { return (await (await fetch('app://local/title')).text()).replace(/\.[^.]+$/, '') || 'documento'; } catch (_) { return 'documento'; } }
+  async function runExport(kind, rg) {
+    const src = rg.all ? docSource : docSource.split('\n').slice(rg.a, rg.b).join('\n');
+    if (kind === 'pdf' || kind === 'html') {
+      const name = await docName();
+      toast('Preparando ' + kind.toUpperCase() + '…', 60000);
+      let html;
+      try { html = await exportDocument(src, name + (rg.all ? '' : ' (selección)')); }
+      catch (e) { toast('No se pudo preparar la exportación: ' + ((e && e.message) || e)); return; }
+      if (!exportFile(kind, html, name + (rg.all ? '' : '-seleccion') + '.' + kind)) toast('La exportación a fichero no está disponible en este entorno');
+      return;
+    }
+    openExportModal(kind, src, scopeLabel(rg));
+  }
+  // --- HTML autocontenido: render completo y sincrono (mermaid esperado, codigo resaltado, imagenes
+  //     locales embebidas como data:), con el CSS de la app y el tema de codigo dentro
+  const IMG_MIME = { svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif' };
+  const blobToDataUrl = (blob) => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
+  const EXPORT_CSS = 'body.export { margin: 0; padding: 0; }\nbody.export .markdown-body { max-width: 900px; margin: 0 auto; padding: 2.4rem 2rem 4rem; }\n@media print { html { font-size: 12pt; } body.export .markdown-body { max-width: none; padding: 0; } pre, table, img, .mermaid, blockquote { break-inside: avoid; } h1, h2, h3, h4 { break-after: avoid; } }';
+  async function exportDocument(src, title) {
+    const host = document.createElement('div');
+    host.className = 'markdown-body';
+    host.style.cssText = 'position:absolute; left:-10000px; top:0; width:' + Math.round(Math.min(900, Math.max(600, content.getBoundingClientRect().width || 900))) + 'px';
+    host.innerHTML = md.render(src);
+    document.body.appendChild(host);
+    try {
+      fixImgs(host); extractMermaid(host);
+      if (!mermaidReady) initMermaid();
+      const nodes = [...host.querySelectorAll('.mermaid:not([data-processed])')];
+      if (nodes.length) { try { await window.mermaid.run({ nodes }); } catch (_) {} }
+      host.querySelectorAll('pre code').forEach((b) => { if (!b.classList.contains('hljs')) { try { window.hljs.highlightElement(b); } catch (_) {} } });
+      await Promise.all([...host.querySelectorAll('img')].map(async (img) => {
+        const u = img.getAttribute('src') || '';
+        if (/^data:/i.test(u)) return;
+        try {
+          const r = await fetch(u); if (!r.ok) throw new Error(r.status);
+          let blob = await r.blob();
+          if (!blob.type || blob.type === 'application/octet-stream') { const mime = IMG_MIME[baseName(u).split('.').pop().toLowerCase()]; if (mime) blob = new Blob([blob], { type: mime }); }
+          img.setAttribute('src', await blobToDataUrl(blob));
+        } catch (_) { /* externa sin CORS: se deja la URL */ }
+      }));
+      host.querySelectorAll('[data-line]').forEach((el) => { el.removeAttribute('data-line'); el.removeAttribute('data-lend'); });
+      const [hl, css] = await Promise.all(['app://local/vendor/github.min.css', 'app://local/style.css'].map((u) => fetch(u).then((r) => r.text()).catch(() => '')));
+      return '<!DOCTYPE html>\n<html lang="es">\n<head>\n<meta charset="utf-8">\n<title>' + escXml(title) + '</title>\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<style>\n' + hl + '\n' + css + '\n' + EXPORT_CSS + '\n</style>\n</head>\n<body class="export">\n<article class="markdown-body">\n' + host.innerHTML + '\n</article>\n</body>\n</html>\n';
+    } finally { host.remove(); }
+  }
+  // fichero via Python (dialogo de guardar; PDF = impresion de ese HTML en una vista aparte).
+  // Canal de pruebas: window.__mdliveExportPath evita el dialogo (Python solo lo acepta en tests).
+  function exportFile(kind, html, name) {
+    const payload = { kind, name, html };
+    if (window.__mdliveExportPath) payload.path = window.__mdliveExportPath;
+    try { window.webkit.messageHandlers.mdliveExport.postMessage(JSON.stringify(payload)); return true; } catch (_) { return false; }
+  }
+  // --- popup de texto (Jira/Confluence/Slack/Teams) + copiar texto / con formato
+  const EXPORT_TARGETS = {
+    jira: { title: 'Jira (wiki markup)', hint: 'Pega el texto en un campo de Jira con wiki markup (descripción, comentario).' },
+    confluence: { title: 'Confluence (storage format)', hint: 'Texto: para el editor de código fuente de la página. «Copiar con formato»: pégalo en el editor visual. Las imágenes locales van como adjuntos por nombre.' },
+    slack: { title: 'Slack', hint: '«Copiar con formato» y pega en el cuadro de mensaje: conserva negritas, listas, citas y código (las tablas van en monoespaciada). El texto es mrkdwn, para bots o el modo «markup».' },
+    teams: { title: 'Teams', hint: '«Copiar con formato» y pega en el cuadro de mensaje: conserva títulos, listas, tablas y código. El texto es el markdown que entiende Teams.' },
+  };
+  let exportRich = '';
+  function exportModalOpen() { return document.body.classList.contains('export-open'); }
+  function openExportModal(kind, src, scope) {
+    const T = EXPORT_TARGETS[kind];
+    exportTitleEl.textContent = 'Exportar ' + scope + ' a ' + T.title;
+    exportHint.textContent = T.hint;
+    let text; try { text = exportText(src, kind); } catch (e) { text = 'Error al convertir: ' + ((e && e.message) || e); }
+    exportArea.value = text;
+    exportRich = exportRichHtml(src, kind);
+    exportStatus.textContent = '';
+    document.body.classList.add('export-open');
+    exportArea.focus(); exportArea.select();
+  }
+  function closeExportModal() { document.body.classList.remove('export-open'); }
+  document.getElementById('export-close').onclick = closeExportModal;
+  exportOverlay.addEventListener('mousedown', (e) => { if (e.target === exportOverlay) closeExportModal(); });
+  document.getElementById('export-copy').onclick = () => { exportStatus.textContent = copyToClipboard(exportArea.value, null) ? 'Texto copiado' : 'No se pudo copiar'; };
+  document.getElementById('export-copy-rich').onclick = () => { exportStatus.textContent = copyToClipboard(exportArea.value, exportRich) ? 'Copiado con formato: pégalo en el editor' : 'No se pudo copiar'; };
+  // texto (y HTML, si se da) al portapapeles del sistema con el evento copy de la propia pagina
+  function copyToClipboard(text, html) {
+    const onCopy = (e) => { e.clipboardData.setData('text/plain', text); if (html) e.clipboardData.setData('text/html', html); e.preventDefault(); };
+    document.addEventListener('copy', onCopy);
+    let ok = false;
+    try { exportArea.focus(); exportArea.select(); ok = document.execCommand('copy'); } catch (_) { ok = false; }
+    document.removeEventListener('copy', onCopy);
+    if (!ok && !html) { try { window.webkit.messageHandlers.mdliveCopy.postMessage(text); ok = true; } catch (_) {} }
+    return ok;
+  }
+  // HTML para "copiar con formato": el render de la app, sin casillas ni imagenes locales (fuera
+  // de la app no se resuelven); Slack no tiene titulos ni tablas -> negrita y monoespaciada
+  function exportRichHtml(src, target) {
+    const div = document.createElement('div');
+    div.innerHTML = md.render(src);
+    div.querySelectorAll('[data-line]').forEach((el) => { el.removeAttribute('data-line'); el.removeAttribute('data-lend'); });
+    div.querySelectorAll('input.task-list-item-checkbox').forEach((cb) => cb.replaceWith(document.createTextNode(cb.checked ? '☑ ' : '☐ ')));
+    div.querySelectorAll('label').forEach((l) => l.replaceWith(...[...l.childNodes]));
+    div.querySelectorAll('img').forEach((img) => { const u = img.getAttribute('src') || ''; if (!isHttp(u)) img.replaceWith(document.createTextNode('[' + (img.getAttribute('alt') || baseName(u)) + ']')); });
+    div.querySelectorAll('code.language-mermaid').forEach((c) => c.classList.remove('language-mermaid'));
+    if (target === 'slack') {
+      div.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((h) => { const p = document.createElement('p'), b = document.createElement('b'); b.innerHTML = h.innerHTML; p.appendChild(b); h.replaceWith(p); });
+      div.querySelectorAll('table').forEach((tb) => { const rows = [...tb.querySelectorAll('tr')].map((tr) => [...tr.children].map((c) => c.textContent.trim())); const pre = document.createElement('pre'); pre.textContent = textTable(rows, rows[0].map(() => 'l')); tb.replaceWith(pre); });
+    }
+    return div.innerHTML;
+  }
+
   if (localStorage.getItem('mdlive-pin') === '1') { document.body.classList.add('pin-on'); btnPin.classList.add('active'); }
   if (localStorage.getItem('mdlive-thumbs') === '1') { document.body.classList.add('thumbs-on'); btnThumbs.classList.add('active'); }
   if (localStorage.getItem('mdlive-minimap') !== '0') { document.body.classList.add('minimap-on'); btnMinimap.classList.add('active'); }
@@ -2699,6 +3101,7 @@
   window.__mdlive = {
     reloadMd: () => { if (editMode) return; refreshFromDisk(false); refreshTitle(); },
     reloadCss: reloadCss,
+    exported: (info) => toast(info.ok ? 'Exportado a ' + info.path : (info.cancelled ? 'Exportación cancelada' : 'No se pudo exportar' + (info.error ? ': ' + info.error : ''))),
   };
 
   (async () => {
