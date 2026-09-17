@@ -716,11 +716,13 @@
     for (const p of CELL_COPY) box.style[p] = cs[p];
     box.style.left = (r.left + window.scrollX) + 'px';
     box.style.top = (r.top + window.scrollY) + 'px';
-    // como minimo la caja de la celda; si la fuente no cabe (`**negrita**` mide mas que la
-    // negrita) crece hacia la derecha, sobre las celdas vecinas, antes que partirse
-    box.style.minWidth = r.width + 'px';
-    box.style.maxWidth = Math.max(r.width, window.innerWidth - r.left - 8) + 'px';
+    // exactamente el ancho de la celda: la fuente que no quepa (`**negrita**` mide mas que la
+    // negrita) se parte y la caja crece hacia ABAJO, nunca se sale por la derecha
+    box.style.width = r.width + 'px';
     box.style.minHeight = r.height + 'px';
+    // 1px menos de relleno derecho: el ancho medido puede quedarse un subpixel corto respecto
+    // al texto de la celda y partiria una palabra que en la celda cabe justa
+    box.style.paddingRight = Math.max(0, parseFloat(cs.paddingRight) - 1) + 'px';
   }
   function startCellEdit(view, from, cell) {
     if (cellEdit) endCellEdit(true);

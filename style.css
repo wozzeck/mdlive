@@ -196,10 +196,10 @@ body {
    de la celda con el sombreado de un bloque en fuente. Tab/Intro confirman y pasan a la celda
    siguiente / de abajo, Esc cancela, clic fuera confirma */
 .cm-cell-editor {
-  position: absolute; z-index: 60; box-sizing: border-box; width: max-content;
+  position: absolute; z-index: 60; box-sizing: border-box;
   background: var(--editing-bg); color: var(--fg);
   border: 1px solid var(--link); box-shadow: inset 0 0 0 1px var(--link); outline: none;
-  white-space: pre-wrap; overflow-wrap: anywhere; cursor: text;
+  white-space: pre-wrap; overflow-wrap: break-word; cursor: text;
 }
 #btn-edit.active { background: var(--link); color: #fff; border-color: var(--link); }
 
