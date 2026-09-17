@@ -92,6 +92,7 @@
           <tr><td><kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>6</kbd></td><td>Encabezado nivel 1–6 (alterna)</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>J</kbd></td><td>Unir las líneas del bloque: quita los saltos de línea que al leer no se ven (también con el botón de la esquina del bloque)</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd></td><td>Lo mismo en todo el documento</td></tr>
+          <tr><td>clic en celda</td><td>Tablas: edita esa celda en su sitio (su fuente); <kbd>Tab</kbd>/<kbd>Shift</kbd>+<kbd>Tab</kbd> celda siguiente/anterior, <kbd>Intro</kbd>/<kbd>Shift</kbd>+<kbd>Intro</kbd> abajo/arriba, <kbd>Esc</kbd> cancela. <kbd>Ctrl</kbd>+clic: la tabla entera en fuente</td></tr>
         </table>
       </section>
     </div>
@@ -363,12 +364,22 @@
       toDOM(view) {
         const div = document.createElement('div');
         div.className = 'cm-mdblock markdown-body' + (this.depth ? ' cm-li-d' + Math.min(this.depth, 6) : '');
+        div.dataset.from = this.from;   // para volver a encontrar el widget tras un dispatch (celdas de tabla)
         div.style.paddingBottom = this.gap.toFixed(3) + 'rem';   // hueco hasta el bloque siguiente
         if (this.gapTop) div.style.paddingTop = this.gapTop.toFixed(3) + 'rem';   // hueco tras una unidad en fuente pegada a esta
         div.innerHTML = md.render(this.text) || '<p class="mdblock-empty">vacío</p>';
         decorateSync(div);
         if (this.q) highlightInElement(div, this.q);  // resalta ocurrencias en el bloque renderizado
         div.addEventListener('mousedown', (e) => {
+          // celda de tabla: se edita en su sitio (Ctrl+clic: la tabla entera a fuente, como el resto;
+          // Alt+clic no vale: el gestor de ventanas se lo queda para mover la ventana)
+          const cell = e.target.closest && e.target.closest('td, th');
+          if (cell && !e.ctrlKey && !e.metaKey) {
+            e.preventDefault(); e.stopPropagation();
+            const { r, c } = cellPos(cell);
+            if (cellEdit) endCellEdit(true, { from: this.from, r, c }); else startCellEdit(view, this.from, cell);
+            return;
+          }
           e.preventDefault();
           view.dispatch({ selection: { anchor: this.from } });
           view.focus();
@@ -377,7 +388,8 @@
         return div;
       }
       destroy(dom) { if (sizeObs) sizeObs.unobserve(dom); }
-      ignoreEvent() { return false; }
+      // el clic en una celda de tabla no es de CM (lo atiende el mousedown de arriba)
+      ignoreEvent(e) { return !!(e.target && e.target.closest && e.target.closest('td, th')); }
     }
     // cache de decoraciones de linea por clase (cm-editing [+ cm-li-gap | cm-edit-hN])
     const _lineDeco = {};
@@ -627,6 +639,140 @@
   function cmJoinSel(view) { const s = view.state.selection.main; return joinBlocks(view, (blk, end) => s.from <= end && s.to >= blk.from); }
   function cmJoinAll(view) { return joinBlocks(view, () => true); }
   function cmJoinAt(view, pos) { return joinBlocks(view, (blk, end) => pos >= blk.from && pos <= end); }
+  // ---- tablas: editar una celda en el bloque renderizado ---------------------
+  // Celdas de una fila de tabla GFM: los trozos entre `|` no escapados (un `|` cuenta como
+  // escapado si le precede una `\`, igual que escapedSplit de markdown-it), sin el trozo vacio
+  // de antes del primer pipe ni el de despues del ultimo (pipes de borde). Devuelve, con
+  // offsets en la linea, el trozo [from, to) y su contenido sin espacios [cFrom, cTo).
+  function tableCells(text) {
+    const cuts = [];
+    for (let i = 0; i < text.length; i++) if (text[i] === '|' && text[i - 1] !== '\\') cuts.push(i);
+    const segs = [];
+    let start = 0;
+    for (const c of cuts) { segs.push([start, c]); start = c + 1; }
+    segs.push([start, text.length]);
+    const blank = (s) => !text.slice(s[0], s[1]).trim();
+    if (cuts.length && blank(segs[0])) segs.shift();
+    if (cuts.length && segs.length && blank(segs[segs.length - 1])) segs.pop();
+    return segs.map(([a, b]) => {
+      const s = text.slice(a, b), lead = s.match(/^\s*/)[0].length, trail = s.match(/\s*$/)[0].length;
+      return { from: a, to: b, cFrom: a + lead, cTo: Math.max(a + lead, b - trail) };
+    });
+  }
+  // Cambio (offsets en la linea) que deja `txt` como contenido de la celda c de la fila.
+  // Celda con texto: se sustituye solo el texto (conserva el relleno de espacios); celda
+  // vacia: se sustituye el trozo entero por ` txt `; celda que la fila no tiene: se anade
+  // al final, con los pipes que falten. Los `|` del texto se escapan para no partir la fila.
+  function tableCellEdit(text, c, txt) {
+    txt = txt.replace(/(^|[^\\])\|/g, '$1\\|');
+    const cells = tableCells(text);
+    if (c < cells.length) {
+      const s = cells[c];
+      return (s.cFrom === s.cTo) ? { from: s.from, to: s.to, insert: ' ' + txt + ' ' } : { from: s.cFrom, to: s.cTo, insert: txt };
+    }
+    const end = text.replace(/\s+$/, '').length;
+    let ins = /\|\s*$/.test(text) ? '' : ' |';
+    for (let k = cells.length; k < c; k++) ins += ' |';
+    return { from: end, to: text.length, insert: ins + ' ' + txt + ' |' };
+  }
+  // Tabla de primer nivel de la unidad: linea del documento (1-based) donde empieza y numero
+  // de filas editables (cabecera + cuerpo; la fila de alineacion no). null si la unidad no
+  // es una tabla (o la tabla va dentro de una cita: esa se edita como fuente, como antes).
+  function tableInfo(doc, blk) {
+    let tokens; try { tokens = md.parse(blk.render || blk.text, {}); } catch (_) { return null; }
+    const t = tokens.find((u) => u.type === 'table_open' && u.level === 0 && u.map);
+    return t ? { line: doc.lineAt(blk.from).number + t.map[0], rows: t.map[1] - t.map[0] - 1 } : null;
+  }
+  // Edicion de UNA celda en el bloque renderizado. Con un clic se abre sobre la celda un
+  // cajon contenteditable (cm-cell-editor) con la FUENTE de la celda (`**negrita**`, no la
+  // negrita: editar HTML renderizado y volver a markdown no es fiable); el resto de la tabla
+  // sigue renderizado. El cajon vive FUERA del DOM de CM (colgado de <body>, en coordenadas
+  // de pagina): si fuera un contenteditable dentro del widget, CM veria la seleccion dentro
+  // de su contentDOM, la daria por suya y al medir la devolveria a su caret (el foco se iba
+  // al editor). Al salir se confirma con un dispatch que sustituye solo esa celda en su
+  // linea; el widget se re-crea y, si toca, se sigue en la celda destino (localizada en el
+  // widget nuevo por data-from). Tab / Shift+Tab: siguiente / anterior; Intro / Shift+Intro:
+  // abajo / arriba; Esc cancela; clic fuera confirma. Ctrl+clic abre la tabla en fuente.
+  let cellEdit = null;   // { view, from, r, c, cell, text, tStart, rows, cols }
+  let cellBox = null;    // el cajon (uno, reutilizado)
+  const cellPos = (cell) => ({ r: cell.parentElement.rowIndex, c: cell.cellIndex });   // rowIndex cuenta thead + tbody
+  const cellAt = (root, r, c) => { const tr = root && root.querySelectorAll('tr')[r]; return (tr && tr.children[c]) || null; };
+  const widgetDom = (from) => editorHost.querySelector('.cm-mdblock[data-from="' + from + '"]');
+  const rowLine = (tStart, r) => tStart + (r === 0 ? 0 : r + 1);   // fila 0 = cabecera; la 1 de la fuente es la de alineacion
+  const CELL_COPY = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'textAlign',
+                     'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'];
+  function cellEditor() {
+    if (cellBox) return cellBox;
+    cellBox = document.createElement('div');
+    cellBox.className = 'cm-cell-editor';
+    cellBox.setAttribute('contenteditable', 'true');
+    cellBox.addEventListener('keydown', onCellKey);
+    cellBox.addEventListener('blur', onCellBlur);
+    return cellBox;
+  }
+  // el cajon se pone justo encima de la celda, con su misma tipografia y relleno
+  function placeCellBox(box, cell) {
+    const r = cell.getBoundingClientRect(), cs = getComputedStyle(cell);
+    for (const p of CELL_COPY) box.style[p] = cs[p];
+    box.style.left = (r.left + window.scrollX) + 'px';
+    box.style.top = (r.top + window.scrollY) + 'px';
+    // como minimo la caja de la celda; si la fuente no cabe (`**negrita**` mide mas que la
+    // negrita) crece hacia la derecha, sobre las celdas vecinas, antes que partirse
+    box.style.minWidth = r.width + 'px';
+    box.style.maxWidth = Math.max(r.width, window.innerWidth - r.left - 8) + 'px';
+    box.style.minHeight = r.height + 'px';
+  }
+  function startCellEdit(view, from, cell) {
+    if (cellEdit) endCellEdit(true);
+    const st = view.state, blk = blocksOf(st).find((b) => b.from === from);
+    const tb = blk && tableInfo(st.doc, blk);
+    if (!tb) { view.dispatch({ selection: { anchor: from } }); view.focus(); return; }
+    const { r, c } = cellPos(cell);
+    if (r >= tb.rows) return;
+    const line = st.doc.line(rowLine(tb.line, r)), cells = tableCells(line.text);
+    const text = c < cells.length ? line.text.slice(cells[c].cFrom, cells[c].cTo) : '';
+    cellEdit = { view, from, r, c, cell, text, tStart: tb.line, rows: tb.rows,
+                 cols: tableCells(st.doc.line(tb.line).text).length };
+    const box = cellEditor();
+    box.textContent = text;
+    if (!box.parentNode) document.body.appendChild(box);
+    placeCellBox(box, cell);
+    box.focus();
+    const rg = document.createRange(); rg.selectNodeContents(box); rg.collapse(false);   // caret al final
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(rg);
+  }
+  // confirma (o cancela) la celda abierta; con next = {from, r, c} sigue editando esa otra
+  function endCellEdit(commit, next) {
+    const ce = cellEdit; if (!ce) return;
+    cellEdit = null;
+    const { view } = ce, box = cellBox;
+    if (commit) {
+      const txt = box.textContent.replace(/\u00a0/g, ' ').replace(/\s*[\r\n]+\s*/g, ' ').trim();
+      if (txt !== ce.text) {
+        const ln = view.state.doc.line(rowLine(ce.tStart, ce.r)), ch = tableCellEdit(ln.text, ce.c, txt);
+        // el widget se re-crea con el texto nuevo (su data-from no cambia: el cambio es dentro)
+        view.dispatch({ changes: { from: ln.from + ch.from, to: ln.from + ch.to, insert: ch.insert } });
+      }
+    }
+    if (next) { const nc = cellAt(widgetDom(next.from), next.r, next.c); if (nc) { startCellEdit(view, next.from, nc); return; } }
+    box.remove();
+    view.focus();
+  }
+  function moveCell(dr, dc) {
+    const ce = cellEdit; if (!ce) return;
+    let { r, c } = ce;
+    if (dc) { c += dc; if (c >= ce.cols) { c = 0; r++; } else if (c < 0) { c = ce.cols - 1; r--; } }
+    r += dr;
+    endCellEdit(true, (r >= 0 && r < ce.rows) ? { from: ce.from, r, c } : null);   // fuera de la tabla: confirmar y salir
+  }
+  function onCellKey(e) {
+    if (!cellEdit) return;
+    // stopPropagation: el handler global de teclado sale de edicion con Esc
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); endCellEdit(false); }
+    else if (e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); moveCell(0, e.shiftKey ? -1 : 1); }
+    else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); moveCell(e.shiftKey ? -1 : 1, 0); }
+  }
+  function onCellBlur() { if (cellEdit) endCellEdit(true); }
   // ---- movimiento VERTICAL del cursor en el editor -------------------------
   // Con el live-preview, todo lo que no toca la selección son widgets de bloque. CM
   // resuelve el movimiento vertical por coordenadas y, al no encontrar ninguna línea de
