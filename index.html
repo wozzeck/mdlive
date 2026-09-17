@@ -233,8 +233,11 @@
   }
 
   // ===== MODO EDICION: CodeMirror 6 + live-preview por bloques ==============
-  // Agrupa lineas en bloques (respeta fences). Cada bloque que NO toca el
-  // cursor se reemplaza por un widget renderizado; el del cursor queda en fuente.
+  // Las lineas se agrupan en TIRADAS sin lineas en blanco (runsOf, respeta fences) y cada
+  // tirada se parte en UNIDADES por los tokens de primer nivel de markdown-it y, en las
+  // listas, item a item (splitRun). Cada unidad que NO toca el cursor se reemplaza por un
+  // widget renderizado; la del cursor queda en fuente. En el resto del codigo "bloque" =
+  // unidad.
   // Hasta donde llega el bloque i CONTANDO las lineas en blanco que le siguen: son las que
   // absorbe su widget (para que no queden lineas vacias entre bloques renderizados). El
   // cursor cuenta como "dentro" del bloque tambien si esta en ellas -- ahi es donde cae al
@@ -245,7 +248,7 @@
     const next = blocks[i + 1];
     return next ? doc.lineAt(next.from - 1).to : doc.length;
   }
-  function blocksOf(state) {
+  function runsOf(state) {
     const doc = state.doc, res = [];
     let from = null, lines = [], inFence = false, ch = '';
     for (let i = 1; i <= doc.lines; i++) {
@@ -261,6 +264,72 @@
     }
     if (from !== null) res.push({ from, to: doc.line(doc.lines).to, text: lines.join('\n') });
     return res;
+  }
+  // Parte una TIRADA (lineas sin blancos) en unidades de edicion por los tokens de primer
+  // nivel de markdown-it (parrafo, encabezado, tabla, cita, fence...) y, dentro de una
+  // lista, ITEM a ITEM a cualquier profundidad: asi al editar solo pasa a fuente el item
+  // del caret, no la lista entera. Devuelve [{l0, l1, text, render, li}] con lineas
+  // relativas a la tirada; li = {depth, first, last} (primer/ultimo item de TODA la lista,
+  // para el espaciado). `render` es lo que se renderiza: el item sin su sangria, porque
+  // con 4+ espacios (o un tab) markdown-it lo tomaria por codigo; la sangria de la
+  // profundidad la pone el CSS (cm-li-dN).
+  function splitRun(text) {
+    const lines = text.split('\n'), last = lines.length - 1, parts = [];
+    let tokens = null;
+    try { tokens = md.parse(text, {}); } catch (_) { /* fuente rara: una sola unidad */ }
+    for (let i = 0; tokens && i < tokens.length; i++) {
+      const t = tokens[i];
+      if (t.level !== 0 || !t.map || t.nesting < 0) continue;
+      if (t.type === 'bullet_list_open' || t.type === 'ordered_list_open') {
+        // items de esta lista (a cualquier profundidad) hasta su cierre de nivel 0
+        const items = [], stack = [];
+        let j = i;
+        for (; j < tokens.length; j++) {
+          const u = tokens[j];
+          if (u.nesting === 1 && /_list_open$/.test(u.type)) stack.push(1);
+          else if (u.nesting === -1 && /_list_close$/.test(u.type)) { stack.pop(); if (!stack.length) break; }
+          else if (u.type === 'list_item_open') items.push({ line: u.map[0], depth: stack.length - 1 });
+        }
+        items.forEach((it, k) => parts.push({
+          l0: it.line, l1: (k + 1 < items.length ? items[k + 1].line : t.map[1]) - 1,
+          li: { depth: it.depth, first: k === 0, last: k === items.length - 1 },
+        }));
+        i = j;
+        continue;
+      }
+      parts.push({ l0: t.map[0], l1: t.map[1] - 1 });
+    }
+    // lineas que ningun token cubre (definiciones de referencia...): se pegan a la unidad
+    // anterior; si no hay tokens, toda la tirada es una unidad. Dos items pueden empezar en
+    // la MISMA linea (`- - a`: el item exterior contiene la lista interior): se queda el
+    // exterior, que es el que da la sangria de la linea.
+    parts.sort((a, b) => a.l0 - b.l0);
+    for (let k = parts.length - 1; k > 0; k--) if (parts[k].l0 === parts[k - 1].l0) parts.splice(k, 1);
+    if (!parts.length) parts.push({ l0: 0, l1: last });
+    parts[0].l0 = 0;
+    for (let k = 0; k + 1 < parts.length; k++) parts[k].l1 = parts[k + 1].l0 - 1;
+    parts[parts.length - 1].l1 = last;
+    for (const p of parts) {
+      const ls = lines.slice(p.l0, p.l1 + 1);
+      p.text = ls.join('\n');
+      const ind = p.li ? ls[0].match(/^\s*/)[0].length : 0;
+      p.render = ind ? ls.map((l) => l.slice(Math.min(ind, l.match(/^\s*/)[0].length))).join('\n') : p.text;
+    }
+    return parts;
+  }
+  // cache por texto de tirada, renovada en cada llamada: solo se re-parsea lo que cambio
+  // (blocksOf corre en cada transaccion de CM y con cada flecha)
+  let unitCache = new Map();
+  function blocksOf(state) {
+    const doc = state.doc, out = [], fresh = new Map();
+    for (const run of runsOf(state)) {
+      const parts = fresh.get(run.text) || unitCache.get(run.text) || splitRun(run.text);
+      fresh.set(run.text, parts);
+      const first = doc.lineAt(run.from).number;
+      for (const p of parts) out.push({ from: doc.line(first + p.l0).from, to: doc.line(first + p.l1).to, text: p.text, render: p.render, li: p.li });
+    }
+    unitCache = fresh;
+    return out;
   }
 
   function makeLivePreview(CM) {
@@ -289,12 +358,13 @@
       sizeObs.observe(dom);
     }
     class MdWidget extends WidgetType {
-      constructor(text, from, q, gap) { super(); this.text = text; this.from = from; this.q = q; this.gap = gap; }
-      eq(o) { return o.text === this.text && o.from === this.from && o.q === this.q && o.gap === this.gap; }
+      constructor(text, from, q, gap, gapTop, depth) { super(); this.text = text; this.from = from; this.q = q; this.gap = gap; this.gapTop = gapTop; this.depth = depth; }
+      eq(o) { return o.text === this.text && o.from === this.from && o.q === this.q && o.gap === this.gap && o.gapTop === this.gapTop && o.depth === this.depth; }
       toDOM(view) {
         const div = document.createElement('div');
-        div.className = 'cm-mdblock markdown-body';
+        div.className = 'cm-mdblock markdown-body' + (this.depth ? ' cm-li-d' + Math.min(this.depth, 6) : '');
         div.style.paddingBottom = this.gap.toFixed(3) + 'rem';   // hueco hasta el bloque siguiente
+        if (this.gapTop) div.style.paddingTop = this.gapTop.toFixed(3) + 'rem';   // hueco tras una unidad en fuente pegada a esta
         div.innerHTML = md.render(this.text) || '<p class="mdblock-empty">vacío</p>';
         decorateSync(div);
         if (this.q) highlightInElement(div, this.q);  // resalta ocurrencias en el bloque renderizado
@@ -312,6 +382,10 @@
     // cache de decoraciones de linea por clase (cm-editing [+ cm-li-gap | cm-edit-hN])
     const _lineDeco = {};
     const lineDeco = (cls) => _lineDeco[cls] || (_lineDeco[cls] = Decoration.line({ class: cls }));
+    // padding-top para la primera linea de una unidad en fuente pegada a otra tambien en
+    // fuente (seleccion que abarca dos items): el hueco que entre widgets pone el padding
+    const _gapTop = {};
+    const gapTopDeco = (rem) => { const k = rem.toFixed(3); return _gapTop[k] || (_gapTop[k] = Decoration.line({ attributes: { style: 'padding-top:' + k + 'rem' } })); };
     const ITEM_RE = /^\s*([-*+]|\d+[.)])\s/;
     const HEAD_RE = /^(#{1,6})\s/;
     const HR_RE = /^\s*(-{3,}|\*{3,}|_{3,})\s*$/;
@@ -343,7 +417,13 @@
     // parrafo sin linea en blanco entre medias). Excepcion: si empieza con fence es UN
     // solo elemento (pre o diagrama) y lo define su primera linea (la de cierre no dice
     // si era mermaid)
+    // .markdown-body li + li { margin-top: .25em } y li > ul/ol { margin: .25em 0 0 }
+    const LI_GAP = .25;
     function blockSpacing(doc, blk) {
+      // item de lista: entre dos items siempre hay .25em (hermano: li + li; hijo: margen de
+      // la sublista, que abajo no tiene); el primero y el ultimo ponen los margenes de la
+      // lista entera (0 arriba, 1.05em abajo)
+      if (blk.li) return { top: blk.li.first ? 0 : LI_GAP, bottom: blk.li.last ? 1.05 : 0, padB: 0 };
       const first = doc.lineAt(blk.from).text;
       const a = lineMargins(first);
       const z = FENCE_RE.test(first) ? a : lineMargins(doc.lineAt(blk.to).text);
@@ -383,6 +463,11 @@
       // el visor: alli los margenes colapsan, asi que el hueco es max(), no la suma.
       const sp = blocks.map((blk) => blockSpacing(doc, blk));
       const gapAfter = (i) => (i + 1 < blocks.length) ? Math.max(sp[i].bottom, sp[i + 1].top) : sp[i].bottom;
+      // Dos unidades PEGADAS (sin linea en blanco: items de una lista, titulo + parrafo) no
+      // tienen lineas en blanco que convertir en hueco. Si la de arriba esta en fuente, su
+      // hueco inferior lo pone la de abajo: padding-top del widget, o de su primera linea
+      // si tambien esta en fuente.
+      let pendTop = 0;
       for (let i = 0; i < blocks.length; i++) {
         const blk = blocks[i];
         const nextB = blocks[i + 1];
@@ -406,13 +491,17 @@
             ? doc.lineAt(sel.head) : null;
           const lastLine = (cl || doc.lineAt(blk.to)).number;
           const joins = softJoins(doc, blk).length;
+          const depthCls = (blk.li && blk.li.depth) ? ' cm-li-d' + Math.min(blk.li.depth, 6) : '';
           let ln = doc.lineAt(blk.from), prevItem = false;
           for (;;) {
             const item = ITEM_RE.test(ln.text);
             const hm = ln.text.match(HEAD_RE);
-            const cls = hm ? ('cm-editing cm-edit-h' + hm[1].length) : ((item && prevItem) ? 'cm-editing cm-li-gap' : 'cm-editing');
+            const cls = (hm ? ('cm-editing cm-edit-h' + hm[1].length) : ((item && prevItem) ? 'cm-editing cm-li-gap' : 'cm-editing')) + depthCls;
             b.add(ln.from, ln.from, lineDeco(cls));
-            if (joins && ln.from === blk.from) b.add(ln.from, ln.from, Decoration.widget({ widget: new JoinWidget(blk.from, joins), side: -1 }));
+            if (ln.from === blk.from) {
+              if (pendTop) b.add(ln.from, ln.from, gapTopDeco(pendTop));
+              if (joins) b.add(ln.from, ln.from, Decoration.widget({ widget: new JoinWidget(blk.from, joins), side: -1 }));
+            }
             prevItem = item;
             if (ln.number >= lastLine) break;
             ln = doc.line(ln.number + 1);
@@ -421,9 +510,11 @@
             if (!cl) b.add(blankFrom, blankTo, Decoration.replace({ block: true, widget: new GapWidget(belowGap) }));
             else if (cl.to < blankTo) b.add(doc.line(cl.number + 1).from, blankTo, Decoration.replace({ block: true, widget: new GapWidget(Math.max(0, belowGap - LINE_REM)) }));
           }
+          pendTop = (nextB && absTo === blk.to) ? gapAfter(i) : 0;   // pegada a la siguiente: el hueco lo pone ella
           continue;
         }
-        b.add(blk.from, absTo, Decoration.replace({ widget: new MdWidget(blk.text, blk.from, searchQuery, gapAfter(i)), block: true }));
+        b.add(blk.from, absTo, Decoration.replace({ widget: new MdWidget(blk.render || blk.text, blk.from, searchQuery, gapAfter(i), pendTop, blk.li ? blk.li.depth : 0), block: true }));
+        pendTop = 0;
       }
       return b.finish();
     }
@@ -512,7 +603,7 @@
   function softJoins(doc, blk) {
     const first = doc.lineAt(blk.from).number, changes = [];
     let tokens;
-    try { tokens = md.parse(blk.text, {}); } catch (_) { return changes; }
+    try { tokens = md.parse(blk.render || blk.text, {}); } catch (_) { return changes; }   // render: el item sin sangria
     for (const t of tokens) {
       if (t.type !== 'paragraph_open' || !t.map) continue;
       for (let k = t.map[0]; k < t.map[1] - 1; k++) {

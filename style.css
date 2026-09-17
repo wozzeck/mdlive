@@ -153,6 +153,19 @@ body {
 /* item de lista (no el primero) en fuente: replica el margin .25em de `li + li`
    del visor para que el interlineado de la lista coincida con el modo lectura */
 .cm-editor .cm-li-gap { padding-top: .25em; }
+/* item anidado (su widget y sus lineas en fuente): sangria por profundidad = el
+   padding-left de cada <ul>/<ol> anidado del visor (1.6em). Si cambias uno, cambia el otro */
+.cm-editor .cm-li-d1 { padding-left: 1.6em; }
+.cm-editor .cm-li-d2 { padding-left: 3.2em; }
+.cm-editor .cm-li-d3 { padding-left: 4.8em; }
+.cm-editor .cm-li-d4 { padding-left: 6.4em; }
+.cm-editor .cm-li-d5 { padding-left: 8em; }
+.cm-editor .cm-li-d6 { padding-left: 9.6em; }
+/* y la vineta del nivel, como la pone el navegador en las sublistas del visor
+   (disco -> circulo -> cuadrado): cada item anidado es aqui su propio <ul> de primer nivel */
+.cm-editor .cm-li-d1 > ul { list-style-type: circle; }
+.cm-editor .cm-li-d2 > ul, .cm-editor .cm-li-d3 > ul, .cm-editor .cm-li-d4 > ul,
+.cm-editor .cm-li-d5 > ul, .cm-editor .cm-li-d6 > ul { list-style-type: square; }
 /* encabezado en edicion: la fuente (`# Titulo`) conserva el tamano del nivel */
 .cm-editor .cm-edit-h1, .cm-editor .cm-edit-h2, .cm-editor .cm-edit-h3,
 .cm-editor .cm-edit-h4, .cm-editor .cm-edit-h5, .cm-editor .cm-edit-h6 { font-weight: 700; line-height: 1.25; }
