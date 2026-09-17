@@ -1,0 +1,30 @@
+// Tablas: tableCells (troceado de una fila GFM), tableCellEdit (cambio de una celda), tableInfo
+module.exports = (t, api, h) => {
+  const apply = (s, ch) => s.slice(0, ch.from) + ch.insert + s.slice(ch.to);
+  const cells = (s) => api.tableCells(s).map((c) => s.slice(c.cFrom, c.cTo));
+  t.eq('pipes de borde', cells('| a | b | c |'), ['a', 'b', 'c']);
+  t.eq('sin bordes', cells('a | b | c'), ['a', 'b', 'c']);
+  t.eq('solo borde izquierdo', cells('| a | b'), ['a', 'b']);
+  t.eq('con sangria', cells('  | a | b |'), ['a', 'b']);
+  t.eq('pipe escapado', cells('| a \\| b | c |'), ['a \\| b', 'c']);
+  t.eq('vacia en medio', cells('| a |  | c |'), ['a', '', 'c']);
+  t.eq('vacia al final', cells('| a | b | |'), ['a', 'b', '']);
+  t.eq('una celda sin pipes', cells('solo texto'), ['solo texto']);
+  t.eq('codigo con pipe escapado', cells('| `a\\|b` | c |'), ['`a\\|b`', 'c']);
+  const edit = (s, c, txt) => apply(s, api.tableCellEdit(s, c, txt));
+  t.eq('editar texto', edit('| a | b | c |', 1, 'BB'), '| a | BB | c |');
+  t.eq('conserva el relleno', edit('| a   | b   |', 0, 'xx'), '| xx   | b   |');
+  t.eq('vaciar celda', edit('| a | b |', 0, ''), '|  | b |');
+  t.eq('rellenar vacia', edit('| a |  | c |', 1, 'B'), '| a | B | c |');
+  t.eq('rellenar vacia estrecha', edit('| a || c |', 1, 'B'), '| a | B | c |');
+  t.eq('celda que falta (fila corta con borde)', edit('| a |', 2, 'C'), '| a | | C |');
+  t.eq('celda que falta (sin borde)', edit('a | b', 2, 'C'), 'a | b | C |');
+  t.eq('pipe en el texto se escapa', edit('| a | b |', 0, 'x|y'), '| x\\|y | b |');
+  t.eq('pipe ya escapado no se dobla', edit('| a | b |', 0, 'x\\|y'), '| x\\|y | b |');
+  t.eq('cabecera', edit('| **A** | B |', 0, '**AA**'), '| **AA** | B |');
+  const tbl = '| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |';
+  const info = (src) => { const doc = h.mkDoc(src); return api.tableInfo(doc, { from: 0, to: src.length, text: src }); };
+  t.eq('tableInfo: linea y filas editables', info(tbl), { line: 1, rows: 3 });
+  t.eq('tableInfo: parrafo -> null', info('texto'), null);
+  t.eq('tableInfo: tabla en cita -> null (se edita como fuente)', info('> | a |\n> |---|\n> | 1 |'), null);
+};

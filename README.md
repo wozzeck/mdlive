@@ -86,11 +86,22 @@ cp mdlive.desktop ~/.local/share/applications/
 xdg-mime default mdlive.desktop text/markdown
 ```
 
+## Tests
+
+```bash
+tests/run.sh          # toda la suite
+tests/run.sh unit     # solo los unitarios
+```
+
+- **Unitarios** (`tests/unit/*.test.js`, node sin dependencias): las funciones puras del editor —unir líneas, troceado en unidades (listas ítem a ítem), celdas de tabla— van marcadas en `index.html` con `// @test-begin <nombre>` … `// @test-end`; el runner las extrae y las ejecuta con el markdown-it vendorizado.
+- **Integración** (`tests/gui/test_*.py`): lanza la aplicación real sobre una copia de `tests/fixtures/*.md`, aislada (`XDG_*` a un directorio temporal: recientes, instancias y `localStorage` propios), con teclado y ratón reales (`xdotool`), capturas (`import`) y consulta del DOM por el canal de pruebas de `mdlive.py` (`MDLIVE_TEST_DIR`, ficheros `cmd-*.js`/`res-*.json`). Necesita `DISPLAY`, `xdotool`, `imagemagick` y `python3-pil`. Cubre el título de la ventana, unir líneas, el tooltip del índice, la edición de celdas y la igualdad píxel a píxel visor/editor con listas.
+
 ## Estructura
 
 - `mdlive.py` — la aplicación GTK3/WebKit2 (sin servidor; esquema `app://`, live reload, guardado).
 - `index.html` — frontend (render, modo edición CodeMirror, índice).
 - `style.css` — estilos del contenido, **editables en caliente**.
+- `tests/` — suite (ver arriba).
 - `vendor/` — dependencias vendorizadas (offline).
 - `icon.svg` / `icon.png` — icono.
 - `mdlive` — lanzador; `mdlive.desktop` — entrada de escritorio.

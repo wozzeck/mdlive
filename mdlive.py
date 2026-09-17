@@ -33,6 +33,10 @@ _RUN_HOME = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR")
                          or os.environ.get("XDG_CACHE_HOME")
                          or (pathlib.Path.home() / ".cache"))
 INSTANCES_DIR = _RUN_HOME / "mdlive" / "instances"
+# Canal de pruebas (solo si MDLIVE_TEST_DIR esta definido; lo usa tests/gui): cada fichero
+# cmd-<id>.js que aparezca ahi se ejecuta en la pagina y su resultado (cadena) se deja en
+# res-<id>.json. Sin sockets, como el resto de la app.
+TEST_DIR = pathlib.Path(os.environ["MDLIVE_TEST_DIR"]) if os.environ.get("MDLIVE_TEST_DIR") else None
 
 
 def _pid_alive(pid):
@@ -510,7 +514,31 @@ class MdLive(Gtk.Window):
                     self._js("window.__mdlive && window.__mdlive.%s()" % fn)
                 if key == "md":
                     self._refresh_title()
+        if TEST_DIR:
+            self._poll_test_cmds()
         return True
+
+    def _poll_test_cmds(self):
+        for f in sorted(TEST_DIR.glob("cmd-*.js")):
+            try:
+                js = f.read_text(encoding="utf-8")
+                f.unlink()
+            except OSError:
+                continue
+            res = TEST_DIR / ("res-%s.json" % f.name[4:-3])
+
+            def done(wv, result, _data, res=res):
+                try:
+                    val = wv.run_javascript_finish(result).get_js_value().to_string()
+                except Exception as e:  # noqa: BLE001
+                    val = json.dumps({"e": "run_javascript: %s" % e})
+                try:
+                    tmp = res.with_suffix(".tmp")
+                    tmp.write_text(val, encoding="utf-8")
+                    os.replace(tmp, res)
+                except OSError:
+                    pass
+            self.webview.run_javascript(js, None, done, None)
 
     def _js(self, script):
         try:
