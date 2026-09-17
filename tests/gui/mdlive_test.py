@@ -192,6 +192,21 @@ class App:
         return Image.open(p).convert("RGB")
 
     # ---- atajos de alto nivel -----------------------------------------------
+    def toolbar_show(self):
+        """Despliega la botonera oculta (asoma por el borde derecho): raton al borde a su altura y espera
+        a que termine el deslizamiento (transform .18s)."""
+        r = self.rect("document.getElementById('toolbar')")
+        self.move(self.js("return document.documentElement.clientWidth") - 4, r["t"] + r["h"] / 2)
+        self.wait_js("return document.getElementById('toolbar').classList.contains('show')")
+        self.wait_js("const t = document.getElementById('toolbar'); return t.getBoundingClientRect().right <= document.documentElement.clientWidth - 8")
+        time.sleep(0.25)
+
+    def toolbar_click(self, btn_id, delay=0.5):
+        """Clic real en un boton de la botonera (la despliega antes)."""
+        self.toolbar_show()
+        r = self.rect("document.getElementById(%r)" % btn_id)
+        self.click(r["l"] + r["w"] / 2, r["t"] + r["h"] / 2, delay=delay)
+
     def edit_mode(self):
         self.click(600, 700)   # foco al webview
         self.key("e")

@@ -84,7 +84,7 @@ try:
     app.edit_mode()
     app.js("const v = CM.view.EditorView.findFromDOM(document.querySelector('#editor .cm-editor')), l = v.state.doc.line(3); v.dispatch({ selection: { anchor: l.from + 3, head: l.to - 2 } }); return l.text")
     time.sleep(0.4)
-    click_el("#btn-export"); time.sleep(0.4)
+    app.toolbar_click("btn-export"); time.sleep(0.4)
     c.eq("edición: la selección de CM se amplía al bloque", app.js("return %s.querySelector('.hdr').textContent" % MENU), "Exportar la selección (líneas 3–3)")
     click_item("teams"); time.sleep(0.5)
     m = modal()
