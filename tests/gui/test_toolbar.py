@@ -15,8 +15,27 @@ def tb():
 def btn(bid):
     return app.js("const b = document.getElementById(%r), r = b.getBoundingClientRect(), l = b.querySelector('.lbl'), lr = l.getBoundingClientRect();"
                   " return { l: r.left, r: r.right, w: r.width, t: r.top, h: r.height, lw: lr.width, lop: parseFloat(getComputedStyle(l).opacity), text: l.textContent }" % bid)
+def widths():
+    return app.js("return Object.fromEntries([...%s.children].map((b) => [b.id, Math.round(b.getBoundingClientRect().width)]))" % TB)
+def hot_id():
+    return app.js("const h = document.querySelector('#toolbar button.hot'); return h && h.id")
 def minimap_on():
     return app.js("return document.body.classList.contains('minimap-on')")
+def geom():
+    """Con la barra desplegada: su borde derecho, su franja vertical, el ancho compacto y el botón
+    de rótulo más largo (el que fija el ancho de la zona que extiende los rótulos)."""
+    return app.js("""const tb = document.getElementById('toolbar'), r = tb.getBoundingClientRect();
+      let wid = null, bw = -1;
+      for (const b of tb.children) { const w = b.querySelector('.lbl').scrollWidth; if (w > bw) { bw = w; wid = b.id; } }
+      return { right: r.right, top: r.top, bottom: r.bottom, cy: (r.top + r.bottom) / 2, widest: wid,
+               compact: Math.min(...[...tb.children].map((b) => b.offsetWidth)) };""")
+def hover_width(bid):
+    """Ancho real del botón con su rótulo desplegado, posando el ratón encima."""
+    r = app.rect("document.getElementById(%r)" % bid)
+    app.move(r["l"] + r["w"] / 2, r["t"] + r["h"] / 2); time.sleep(0.45)
+    return app.js("return document.getElementById(%r).offsetWidth" % bid)
+def away():
+    app.move(400, 700); time.sleep(0.95)
 try:
     app.wait_js("return document.getElementById('content').children.length > 0")
     app.move(400, 700); time.sleep(0.5)
@@ -29,15 +48,17 @@ try:
     app.wait_js("return %s.classList.contains('show')" % TB); time.sleep(0.45)
     s = tb()
     c.close("desplegada: pegada al borde a .9rem", s["cw"] - s["r"], 0.9 * REM, 1.5)
-    ws = app.js("return [...%s.children].map((b) => Math.round(b.getBoundingClientRect().width))" % TB)
-    c.ok("botones compactos (solo icono) y del mismo ancho", len(set(ws)) == 1 and 26 <= ws[0] <= 34, "%r" % ws)
-    # 2) posarse sobre un botón: se extiende hacia la izquierda con su título y su tecla
-    b0 = btn('btn-minimap')
+    w, hot0 = widths(), hot_id()
+    rest = [v for k, v in w.items() if k != hot0]
+    c.ok("compactos (solo icono) e iguales salvo el de la fila del puntero, que ya sale con su rótulo",
+         bool(hot0) and len(set(rest)) == 1 and 26 <= rest[0] <= 34 and w[hot0] > rest[0] + 40, "%r hot=%s" % (w, hot0))
+    # 2) posarse sobre otro botón: se extiende hacia la izquierda con su título y su tecla
+    b0 = btn('btn-toc')
     app.move(b0["l"] + b0["w"] / 2, b0["t"] + b0["h"] / 2); time.sleep(0.5)
-    b1, other = btn('btn-minimap'), btn('btn-recent')
+    b1, other = btn('btn-toc'), btn('btn-recent')
     c.ok("el botón bajo el puntero se extiende hacia la izquierda (el borde derecho no se mueve)",
          b1["w"] > b0["w"] + 40 and abs(b1["r"] - b0["r"]) < 1 and b1["l"] < b0["l"] - 40, "%r -> %r" % (b0, b1))
-    c.ok("muestra su título y su tecla", b1["lop"] > 0.9 and b1["lw"] > 40 and b1["text"] == "Minimapam", "%r" % b1["text"])
+    c.ok("muestra su título y su tecla", b1["lop"] > 0.9 and b1["lw"] > 40 and b1["text"] == "Índicet", "%r" % b1["text"])
     c.ok("los demás siguen compactos y alineados por la derecha", abs(other["w"] - b0["w"]) < 1 and abs(other["r"] - b1["r"]) < 1, "%r" % other)
     # 3) alejar el ratón: se esconde
     app.move(400, 700); time.sleep(0.9)
@@ -65,6 +86,69 @@ try:
          not app.js("return document.getElementById('export-menu').style.display === 'block'") and not tb()["hold"] and tb()["show"])
     app.move(400, 700); time.sleep(0.9)
     c.ok("al alejarse se esconde", not tb()["show"])
+    # ---- las dos zonas sensibles son más grandes que lo que se ve y se miden solas ----------
+    app.toolbar_show()
+    g = geom()
+    wideW = hover_width(g["widest"])
+    compactW = g["compact"]
+    c.ok("el botón más ancho con su rótulo mide mucho más que el compacto", wideW > compactW * 3, "%s: %r vs %r" % (g["widest"], wideW, compactW))
+    away()
+    # 1) desplegar: toda la caja que ocupan los botones compactos, no unos píxeles del borde
+    app.move(g["right"] - compactW + 2, g["cy"]); time.sleep(0.5)
+    c.ok("el borde izquierdo de los botones compactos ya despliega la barra", tb()["show"])
+    away()
+    app.move(g["right"] - compactW - 10, g["cy"]); time.sleep(0.5)
+    c.ok("a la izquierda de esa caja no se despliega", not tb()["show"])
+    # 2) extender el rótulo: la caja del botón MÁS ANCHO, aunque el botón apuntado sea estrecho
+    app.move(g["right"] - wideW + 6, g["cy"]); time.sleep(0.5)
+    c.ok("la zona ancha no despliega la barra si está escondida", not tb()["show"])
+    app.toolbar_show()
+    sr = app.rect("document.getElementById('btn-search')")
+    app.move(g["right"] - wideW + 6, sr["t"] + sr["h"] / 2); time.sleep(0.6)
+    w = app.js("return document.getElementById('btn-search').offsetWidth")
+    c.ok("en el borde del botón más ancho ya se extiende el rótulo de uno estrecho", compactW + 30 < w < wideW, "ancho %r (compacto %r, más ancho %r)" % (w, compactW, wideW))
+    c.ok("el rótulo se ve entero (el tope se calcula, no es un valor fijo)", app.js("const l = document.querySelector('#btn-search .lbl'); return l.scrollWidth <= l.clientWidth + 1"))
+    c.eq("y la barra sigue desplegada en esa zona", tb()["show"], True)
+    app.move(g["right"] - wideW - 14, sr["t"] + sr["h"] / 2); time.sleep(0.95)
+    c.ok("pasado ese borde se esconde", not tb()["show"])
+    # 3) vertical: los huecos entre botones cuentan para el vecino más cercano
+    app.toolbar_show()
+    a, b = app.rect("document.getElementById('btn-search')"), app.rect("document.getElementById('btn-minimap')")
+    app.move(g["right"] - wideW + 6, (a["b"] + b["t"]) / 2); time.sleep(0.6)
+    hot = app.js("const h = document.querySelector('#toolbar button.hot'); return h && h.id")
+    c.ok("en el hueco entre dos botones se extiende el más cercano", hot in ("btn-search", "btn-minimap"), "%r" % hot)
+    # 4) un botón futuro más ancho agranda la zona sin tocar nada
+    app.js("""const tb = document.getElementById('toolbar'), b = document.createElement('button');
+      b.id = 'btn-futuro'; b.setAttribute('aria-label', 'Futuro');
+      b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>'
+        + '<span class="lbl">Un rótulo de un botón futuro mucho más largo<kbd>z</kbd></span>';
+      tb.appendChild(b); return 1""")
+    time.sleep(0.6)
+    wide2 = hover_width("btn-futuro")
+    c.ok("el botón nuevo es más ancho que todos", wide2 > wideW + 20, "%r vs %r" % (wide2, wideW))
+    away()
+    app.toolbar_show()
+    app.move(g["right"] - wide2 + 6, sr["t"] + sr["h"] / 2); time.sleep(0.6)
+    c.ok("la zona crece con él: el rótulo se extiende ya en el borde nuevo",
+         app.js("return document.getElementById('btn-search').offsetWidth") > compactW + 30)
+finally:
+    app.close()
+# el ancho de los rótulos cambia con el idioma: la zona tiene que seguirlo
+app = App("toc.md", lang="de")
+try:
+    app.toolbar_show()
+    gd = geom()
+    wd = hover_width(gd["widest"])
+    lblVar = app.js("return parseFloat(getComputedStyle(document.getElementById('toolbar')).getPropertyValue('--tb-lbl'))")
+    c.ok("en alemán la barra se mide con sus propios rótulos (tope publicado = ancho real medido)",
+         abs((gd["compact"] + lblVar) - wd) <= 1.5, "medido %r, compacto %r + tope %r" % (wd, gd["compact"], lblVar))
+    away()
+    app.toolbar_show()
+    sd = app.rect("document.getElementById('btn-search')")
+    app.move(gd["right"] - wd + 6, sd["t"] + sd["h"] / 2); time.sleep(0.6)
+    c.ok("la zona llega hasta donde llega el rótulo alemán", app.js("return document.getElementById('btn-search').offsetWidth") > gd["compact"] + 30)
+    app.move(gd["right"] - wd - 14, sd["t"] + sd["h"] / 2); time.sleep(0.95)
+    c.ok("y no más allá", not tb()["show"])
 finally:
     app.close()
 c.finish()

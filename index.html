@@ -8,14 +8,20 @@
 <link id="usercss" rel="stylesheet" href="app://local/style.css">
 <style>
   /* Botonera oculta: asoma 7 px por el borde derecho y se despliega (clase .show, por JS) al acercar el
-     raton; el boton bajo el puntero se extiende hacia la izquierda con su titulo y su tecla. */
+     raton; el boton apuntado (clase .hot, o :hover) se extiende hacia la izquierda con su titulo y su
+     tecla. Las dos zonas sensibles son mas anchas que lo que se ve y las mide el JS (ver measureToolbar):
+     nada de anchos fijos, para que valgan con rotulos de cualquier idioma y con botones que se anadan. */
   #toolbar { position: fixed; top: .6rem; right: .9rem; display: flex; flex-direction: column; align-items: flex-end; gap: .3rem; z-index: 50;
     opacity: .5; transform: translateX(calc(100% + .9rem - 7px)); transition: transform .18s ease, opacity .18s; }
   #toolbar.show { opacity: 1; transform: none; }
   #toolbar button { cursor: pointer; border: 1px solid var(--border, #ccc); background: var(--alt-bg, #f3f3f3); color: inherit; border-radius: 6px; font-size: 13px; line-height: 1; height: 27px; padding: 0 6px; display: flex; flex-direction: row-reverse; align-items: center; justify-content: flex-start; white-space: nowrap; }
   #toolbar button.active { background: var(--link, #0969da); color: #fff; border-color: var(--link, #0969da); }
   #toolbar .lbl { display: block; max-width: 0; overflow: hidden; opacity: 0; margin-right: 0; transition: max-width .16s ease, margin-right .16s ease, opacity .12s; }
-  #toolbar:not(.hold) button:hover .lbl, #toolbar button:focus-visible .lbl { max-width: 14rem; opacity: 1; margin-right: .5rem; }
+  #toolbar:not(.hold) button:hover .lbl, #toolbar:not(.hold) button.hot .lbl,
+  #toolbar button:focus-visible .lbl { max-width: var(--tb-lbl, 14rem); opacity: 1; margin-right: .5rem; }
+  /* medicion (JS, dentro de un mismo fotograma): rotulos enteros y sin animacion en ningun sentido */
+  #toolbar.measure .lbl { max-width: none !important; margin-right: .5rem !important; }
+  #toolbar.measure .lbl, #toolbar.notrans .lbl { transition: none !important; }
   #toolbar .lbl kbd { margin-left: .45rem; font: 11px var(--font-mono, monospace); padding: 1px 4px; border: 1px solid currentColor; border-radius: 4px; opacity: .7; }
   /* iconos de la barra: Lucide (ISC). Los atributos de trazo se declaran aqui
      para que el marcado se quede solo con el viewBox y los trazados. */
@@ -1512,37 +1518,92 @@
   });
 
   // ===== Botonera oculta (borde derecho) ====================================
-  // Asoma 7 px; se despliega al acercar el raton al borde (a la altura de la barra) o al posarse sobre
-  // ella y se esconde con un pequeno retardo al alejarse. `toolbarHold` la mantiene desplegada (y sin
-  // rotulos extendidos) mientras un menu anclado a un boton esta abierto.
+  // Asoma 7 px y se esconde con un pequeno retardo al alejarse. Dos zonas sensibles, las dos mas
+  // grandes que lo que se ve y las dos medidas (nunca fijas: los rotulos cambian con el idioma y
+  // pueden anadirse botones mas anchos):
+  //   - desplegar la barra: la caja que ocuparan los botones COMPACTOS (su ancho + el margen derecho).
+  //   - extender el rotulo del boton apuntado: la caja del boton MAS ANCHO con su rotulo desplegado;
+  //     dentro de ella el rotulo que se extiende es el de la fila mas cercana al puntero (los huecos
+  //     entre botones cuentan para el vecino). Esa zona ancha ademas mantiene la barra desplegada,
+  //     pero no la despliega si estaba escondida.
+  // `toolbarHold` la mantiene desplegada (y sin rotulos extendidos) mientras un menu esta abierto.
   const toolbar = document.getElementById('toolbar');
-  const TB_HOT = 22;             // px desde el borde derecho que despliegan la barra
-  let tbTimer = 0, tbHold = false;
+  const TB_PAD = 8;              // px de holgura vertical de las dos zonas
+  let tbTimer = 0, tbHold = false, tbHot = null, tbMeasuring = false;
+  let tbGeom = { compact: 30, wide: 30, gap: 14, top: 0, bottom: 0, h: 0 };
+
+  // Mide de verdad los dos anchos (una sola pasada de layout): con los rotulos desplegados, el maximo;
+  // compactos, el minimo. El paso intermedio (`notrans`) es para que al quitar `measure` el rotulo no
+  // se anime de vuelta a 0. Tambien publica `--tb-lbl` = tope del rotulo, para no recortar nunca uno
+  // mas largo que el tope por defecto.
+  function measureToolbar() {
+    const kids = [...toolbar.children];
+    if (!kids.length) return;
+    tbMeasuring = true;
+    toolbar.classList.add('measure');
+    const wide = Math.max(...kids.map((b) => b.offsetWidth));
+    toolbar.classList.add('notrans');
+    toolbar.classList.remove('measure');
+    const compact = Math.min(...kids.map((b) => b.offsetWidth));
+    toolbar.classList.remove('notrans');
+    const r = toolbar.getBoundingClientRect();
+    tbGeom = { compact, wide, gap: parseFloat(getComputedStyle(toolbar).right) || 0, top: r.top, bottom: r.bottom, h: r.height };
+    toolbar.style.setProperty('--tb-lbl', (wide - compact) + 'px');
+    tbMeasuring = false;
+  }
+  measureToolbar();
+  // volver a medir cuando cambie el alto de la barra (zoom, botones anadidos) y cuando carguen fuentes
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => {
+      if (!tbMeasuring && Math.abs(toolbar.getBoundingClientRect().height - tbGeom.h) > 0.5) measureToolbar();
+    }).observe(toolbar);
+  }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(measureToolbar).catch(() => {});
   function toolbarShown() { return toolbar.classList.contains('show'); }
   function toolbarShow() { clearTimeout(tbTimer); tbTimer = 0; toolbar.classList.add('show'); }
   function toolbarHide(delay) {
     if (tbHold || tbTimer) return;
-    tbTimer = setTimeout(() => { tbTimer = 0; if (!tbHold && !toolbar.matches(':hover')) toolbar.classList.remove('show'); }, delay);
+    tbTimer = setTimeout(() => { tbTimer = 0; if (!tbHold && !toolbar.matches(':hover')) { toolbar.classList.remove('show'); setToolbarHot(null); } }, delay);
   }
   function toolbarHold(on) {
     tbHold = on; toolbar.classList.toggle('hold', on);
     if (on) toolbarShow(); else if (!toolbar.matches(':hover')) toolbarHide(300);
   }
-  // Caja (coordenadas de ventana) que ocupara el boton compacto con la barra desplegada, sin la
-  // transformacion de deslizamiento (que getBoundingClientRect si incluye a mitad de transicion).
+  // borde derecho de la barra desplegada, sin la transformacion de deslizamiento (que
+  // getBoundingClientRect si incluye a mitad de transicion)
+  function toolbarRight() { return document.documentElement.clientWidth - tbGeom.gap; }
+  // el puntero cae en la zona de ancho w (hasta el borde de la ventana, con holgura vertical)
+  function inToolbarZone(x, y, w) {
+    return x >= toolbarRight() - w && y >= tbGeom.top - TB_PAD && y <= tbGeom.bottom + TB_PAD;
+  }
+  // Caja que ocupara el boton compacto con la barra desplegada (para anclar menus a un boton).
   function toolbarAnchor(btn) {
-    const right = document.documentElement.clientWidth - parseFloat(getComputedStyle(toolbar).right);
-    const w = Math.min(...[...toolbar.children].map((b) => b.offsetWidth));
-    const r = btn.getBoundingClientRect();
-    return { left: right - w, right, top: r.top, bottom: r.bottom };
+    const right = toolbarRight(), r = btn.getBoundingClientRect();
+    return { left: right - tbGeom.compact, right, top: r.top, bottom: r.bottom };
+  }
+  // boton de la fila mas cercana al puntero (asi los huecos entre botones cuentan para el vecino)
+  function toolbarBtnAt(y) {
+    let best = null, bd = Infinity;
+    for (const b of toolbar.children) {
+      const r = b.getBoundingClientRect(), d = Math.abs((r.top + r.bottom) / 2 - y);
+      if (d < bd) { bd = d; best = b; }
+    }
+    return best;
+  }
+  function setToolbarHot(btn) {
+    if (tbHot === btn) return;
+    if (tbHot) tbHot.classList.remove('hot');
+    tbHot = btn;
+    if (btn) btn.classList.add('hot');
   }
   document.addEventListener('mousemove', (e) => {
-    const r = toolbar.getBoundingClientRect();
-    const near = document.documentElement.clientWidth - e.clientX <= TB_HOT && e.clientY >= r.top - 8 && e.clientY <= r.bottom + 8;
-    if (near || toolbar.contains(e.target)) toolbarShow();
-    else if (toolbarShown()) toolbarHide(250);
+    const over = toolbar.contains(e.target);
+    const near = over || inToolbarZone(e.clientX, e.clientY, tbGeom.compact);   // despliega
+    const wide = over || inToolbarZone(e.clientX, e.clientY, tbGeom.wide);      // mantiene y extiende
+    if (near || (wide && toolbarShown())) { toolbarShow(); setToolbarHot(toolbarBtnAt(e.clientY)); }
+    else { setToolbarHot(null); if (toolbarShown()) toolbarHide(250); }
   });
-  document.documentElement.addEventListener('mouseleave', () => { if (toolbarShown()) toolbarHide(250); });
+  document.documentElement.addEventListener('mouseleave', () => { setToolbarHot(null); if (toolbarShown()) toolbarHide(250); });
 
   // ===== Índice / árbol del documento =======================================
   const tocList = document.getElementById('toc-list');
