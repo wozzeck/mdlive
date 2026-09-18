@@ -3,7 +3,8 @@
 (número de línea + fragmento) con el contador, y resalta en el visor tantas coincidencias como cuenta;
 Intro / Shift+Intro / Ctrl+N / Ctrl+P recorren los resultados marcando la fila activa y llevando la
 coincidencia a la vista; clic en una fila salta a ella; Esc cierra. En edición resalta en CodeMirror y
-Intro selecciona la coincidencia en el editor."""
+Intro selecciona la coincidencia en el editor. Al final, Esc desde el cuerpo (sin el foco en el cajón)
+cierra los paneles laterales de uno en uno, del más de paso al más fijo, antes de salir de edición."""
 import time
 from mdlive_test import App, Check
 
@@ -14,6 +15,8 @@ def active():
     return next((i for i, r in enumerate(rows()) if r["active"]), -1)
 def marks(host="#content"):
     return app.js("return [...document.querySelectorAll(%r + ' mark.search-hit')].map((m) => m.getBoundingClientRect().top)" % host)
+def panel(k):
+    return app.js("return document.body.classList.contains(%r)" % (k + "-open"))
 def visible(tops):
     return [t for t in tops if 0 <= t <= app.js("return innerHeight")]
 try:
@@ -65,6 +68,29 @@ try:
     c.ok("y la fila activa es la primera", active() == 0)
     app.key("Escape"); time.sleep(0.3)
     c.ok("Esc cierra sin salir de edición", not app.js("return document.body.classList.contains('search-open')") and app.js("return document.body.classList.contains('edit-mode')"))
+    # ---- Esc desde el cuerpo: cierra los paneles de uno en uno (antes solo valía en el cajón) ----
+    app.key("Escape"); time.sleep(0.7)
+    c.ok("Esc sale de edición cuando no hay nada abierto", not app.js("return document.body.classList.contains('edit-mode')"))
+    app.click(600, 700)
+    app.key("t"); time.sleep(0.35)
+    app.key("r"); time.sleep(0.35)
+    app.key("ctrl+f"); time.sleep(0.35)
+    app.click(600, 700)   # el foco sale del cajón de búsqueda
+    c.ok("los tres paneles abiertos", panel("search") and panel("recent") and panel("toc"))
+    app.key("Escape"); time.sleep(0.45)
+    c.ok("Esc con el foco fuera del cajón cierra el buscador", not panel("search") and panel("recent") and panel("toc"))
+    app.key("Escape"); time.sleep(0.45)
+    c.ok("el siguiente Esc cierra los recientes", not panel("recent") and panel("toc"))
+    app.key("Escape"); time.sleep(0.45)
+    c.ok("y el siguiente, el índice", not panel("toc"))
+    # en edición, primero los paneles y sólo después la edición
+    app.edit_mode()
+    app.toolbar_click("btn-toc"); time.sleep(0.45)
+    c.ok("en edición el índice se abre con su botón", panel("toc"))
+    app.key("Escape"); time.sleep(0.5)
+    c.ok("Esc cierra el panel sin salir de edición", not panel("toc") and app.js("return document.body.classList.contains('edit-mode')"))
+    app.key("Escape"); time.sleep(0.7)
+    c.ok("y el siguiente Esc ya sale de edición", not app.js("return document.body.classList.contains('edit-mode')"))
 finally:
     app.close()
 c.finish()

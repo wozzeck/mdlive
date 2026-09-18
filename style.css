@@ -605,3 +605,17 @@ body.export-open #export-overlay { display: flex; align-items: center; justify-c
   opacity: 0; transform: translate(-50%, 16px); pointer-events: none; transition: opacity .18s, transform .18s; word-break: break-all;
 }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* === Aviso: el fichero ha cambiado fuera del editor ====================== */
+#extbar {
+  position: fixed; left: 50%; bottom: 1.6rem; z-index: 131; display: none; align-items: center; gap: .7rem;
+  max-width: min(760px, calc(100% - 2rem)); padding: .45rem .5rem .45rem 1rem; transform: translateX(-50%);
+  border-radius: 8px; background: var(--fg); color: var(--bg); font-size: 13.5px; box-shadow: 0 8px 28px rgba(0,0,0,.3);
+}
+body.ext-open #extbar { display: flex; }
+body.ext-open #toast { bottom: 4.4rem; }
+#extbar .btn {
+  cursor: pointer; border: 1px solid currentColor; background: transparent; color: inherit;
+  border-radius: 6px; padding: .24em .7em; font-size: 12.5px; white-space: nowrap;
+}
+#extbar .btn:hover { background: rgba(127,127,127,.32); }

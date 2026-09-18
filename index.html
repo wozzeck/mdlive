@@ -16,6 +16,8 @@
   #toolbar.show { opacity: 1; transform: none; }
   #toolbar button { cursor: pointer; border: 1px solid var(--border, #ccc); background: var(--alt-bg, #f3f3f3); color: inherit; border-radius: 6px; font-size: 13px; line-height: 1; height: 27px; padding: 0 6px; display: flex; flex-direction: row-reverse; align-items: center; justify-content: flex-start; white-space: nowrap; }
   #toolbar button.active { background: var(--link, #0969da); color: #fff; border-color: var(--link, #0969da); }
+  /* escondida solo asoman 7 px: se pintan a contraste, si no se confunden con el minimapa (mismo fondo) */
+  #toolbar:not(.show) button { background: var(--muted, #656d76); border-color: var(--muted, #656d76); transition: background-color .18s, border-color .18s; }
   #toolbar .lbl { display: block; max-width: 0; overflow: hidden; opacity: 0; margin-right: 0; transition: max-width .16s ease, margin-right .16s ease, opacity .12s; }
   #toolbar:not(.hold) button:hover .lbl, #toolbar:not(.hold) button.hot .lbl,
   #toolbar button:focus-visible .lbl { max-width: var(--tb-lbl, 14rem); opacity: 1; margin-right: .5rem; }
@@ -90,6 +92,7 @@
   </div>
 </div>
 <div id="toast" aria-live="polite"></div>
+<div id="extbar" role="status"><span data-i18n>El fichero ha cambiado fuera del editor</span><button id="ext-reload" class="btn" data-i18n>Recargar</button><button id="ext-keep" class="btn" data-i18n>Seguir editando</button></div>
 <div id="lightbox" aria-hidden="true" title="Cerrar (Esc)"><img alt=""><div id="lightbox-cap"></div></div>
 <div id="help-overlay" aria-hidden="true">
   <div id="help-modal" role="dialog" aria-modal="true" aria-label="Atajos de teclado">
@@ -113,7 +116,7 @@
           <tr><td data-i18n><kbd>Ctrl</kbd>+rueda</td><td data-i18n>Zoom de solo texto</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>0</kbd></td><td data-i18n>Restablecer el zoom</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>H</kbd></td><td data-i18n>Esta ayuda</td></tr>
-          <tr><td><kbd>Esc</kbd></td><td data-i18n>Cerrar / salir de edición</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td data-i18n>Cerrar lo que esté abierto (menús, paneles) o salir de edición</td></tr>
         </table>
       </section>
       <section>
@@ -298,14 +301,45 @@
     scheduleMinimapBuild();
     renderGutterMarks();
   }
-  let lastFetched = null;
+  let lastFetched = null;   // ultimo contenido que la app da por bueno (en edicion, el del buffer)
+  let diskText = null;      // ultimo contenido que sabemos que hay EN DISCO (para ver cambios de fuera)
+  let extText = null;       // cambio de fuera pendiente mientras se edita (el contenido del disco)
+  let lastTyped = 0;        // ultimo tecleo en el editor: mientras se escribe no se adopta nada solo
+  const EXT_BUSY = 10000;   // ms desde el ultimo tecleo en que se considera que se esta editando
   async function refreshFromDisk(force) {
     let txt;
     try { txt = await (await fetch('app://local/raw', { cache: 'no-store' })).text(); } catch (_) { return; }
-    if (!force && txt === lastFetched) return;
-    lastFetched = txt; docSource = txt;
-    if (!editMode) renderView();
+    if (editMode && cmView) { onDiskChange(txt); return; }
+    if (!force && txt === lastFetched && txt === diskText) return;
+    lastFetched = txt; docSource = txt; diskText = txt;
+    renderView();
   }
+  // El fichero ha cambiado en disco estando en modo edicion. Si aqui no hay nada que perder (el buffer
+  // es exactamente el que habia en disco y no se esta tecleando) se adopta sin molestar; si no, se
+  // avisa y decide el usuario: hasta entonces NO se toca el buffer.
+  function onDiskChange(txt) {
+    const buf = cmView.state.doc.toString();
+    if (txt === buf) { diskText = txt; extText = null; hideExtBar(); return; }
+    if (buf === diskText && Date.now() - lastTyped > EXT_BUSY) { adoptFromDisk(txt); return; }
+    extText = txt; showExtBar();
+  }
+  // Lleva al editor lo que hay en disco conservando el sitio del caret, y cancela el guardado
+  // pendiente (lo que viene del disco no hay que volver a escribirlo).
+  function adoptFromDisk(txt) {
+    const head = Math.min(cmView.state.selection.main.head, txt.length);
+    cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: txt }, selection: { anchor: head } });
+    pendingSave = false; clearTimeout(saveTimer); saveTimer = null;
+    docSource = txt; lastFetched = txt; diskText = txt; lastTyped = 0;
+    extText = null; hideExtBar();
+  }
+  const extBar = document.getElementById('extbar');
+  function extBarOpen() { return document.body.classList.contains('ext-open'); }
+  function showExtBar() { document.body.classList.add('ext-open'); }
+  function hideExtBar() { document.body.classList.remove('ext-open'); }
+  // «Recargar» descarta lo escrito y se queda con el disco; «Seguir editando» solo quita el aviso
+  // (el cambio sigue anotado: si al final no se toca nada, al salir de edicion se adopta).
+  document.getElementById('ext-reload').onclick = () => { if (extText !== null && editMode && cmView) adoptFromDisk(extText); else hideExtBar(); };
+  document.getElementById('ext-keep').onclick = hideExtBar;
 
   // ===== MODO EDICION: CodeMirror 6 + live-preview por bloques ==============
   // Las lineas se agrupan en TIRADAS sin lineas en blanco (runsOf, respeta fences) y cada
@@ -1342,7 +1376,7 @@
       provide: (f) => EditorView.decorations.from(f),
     });
     const saveOnChange = EditorView.updateListener.of((u) => {
-      if (u.docChanged) { docSource = u.state.doc.toString(); lastFetched = docSource; scheduleSave(); scheduleMinimapBuild(); }
+      if (u.docChanged) { docSource = u.state.doc.toString(); lastFetched = docSource; lastTyped = Date.now(); scheduleSave(); scheduleMinimapBuild(); }
       // el bloque en fuente cambia de sitio o de alto (caret a otro bloque, widgets medidos): recuadro al dia
       if (u.docChanged || u.selectionSet || u.geometryChanged) scheduleMinimapUpdate();
     });
@@ -1419,7 +1453,15 @@
     scheduleMinimapBuild();
   }
   function exitEdit(anchor) {
-    if (cmView) { docSource = cmView.state.doc.toString(); lastFetched = docSource; saveNow(); cmView.destroy(); cmView = null; }
+    if (cmView) {
+      // si el fichero cambio fuera y aqui no se ha tocado nada, lo que vale es el disco (si no, la
+      // ventana se quedaria enseñando una version que ya no existe y sin nada que la refresque)
+      const adopt = (extText !== null && !pendingSave && cmView.state.doc.toString() === diskText) ? extText : null;
+      docSource = cmView.state.doc.toString(); lastFetched = docSource; saveNow();
+      if (adopt !== null) { docSource = adopt; lastFetched = adopt; diskText = adopt; }
+      extText = null; hideExtBar();
+      cmView.destroy(); cmView = null;
+    }
     editorHost.style.display = 'none';
     content.style.display = '';
     renderView();
@@ -1431,6 +1473,7 @@
   function scheduleSave() { pendingSave = true; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 500); }
   function saveNow() {
     if (!pendingSave) return; pendingSave = false;
+    diskText = docSource; extText = null; hideExtBar();   // lo que se escribe pasa a ser lo del disco
     try { window.webkit.messageHandlers.mdliveSave.postMessage(docSource); } catch (_) {}
   }
 
@@ -1499,6 +1542,9 @@
     if (exportMenuOpen() && e.key === 'Escape') { e.preventDefault(); closeExportMenu(); return; }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'h' || e.key === 'H')) { e.preventDefault(); toggleHelp(); return; }
     if (e.key === 'Escape' && helpOpen()) { e.preventDefault(); setHelp(false); return; }
+    if (e.key === 'Escape' && extBarOpen()) { e.preventDefault(); hideExtBar(); return; }
+    // Esc cierra lo que haya abierto antes de salir de edicion: primero los paneles mas de paso
+    if (e.key === 'Escape' && closeTopPanel()) { e.preventDefault(); return; }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); focusSearch(e.shiftKey); return; }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'n' || e.key === 'N')) { e.preventDefault(); searchStep(false); return; }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); searchStep(true); return; }
@@ -2238,6 +2284,14 @@
     enterArmed = searchInput.value;
   }
   function toggleSearch() { setSearch(!searchOpen()); }
+  // cierra el panel lateral mas "de paso" que este abierto (buscador > recientes > indice) y dice
+  // si ha cerrado alguno; asi un Esc no se lleva por delante el indice, que suele quedarse fijo
+  function closeTopPanel() {
+    if (searchOpen()) { setSearch(false); return true; }
+    if (recentOpen()) { setRecent(false); return true; }
+    if (tocOpen()) { setToc(false); return true; }
+    return false;
+  }
   btnSearch.onclick = toggleSearch;
   searchInput.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => runSearch(searchInput.value), 180); });
   searchInput.addEventListener('keydown', (e) => {
@@ -3247,7 +3301,7 @@
   initMermaid();
 
   window.__mdlive = {
-    reloadMd: () => { if (editMode) return; refreshFromDisk(false); refreshTitle(); },
+    reloadMd: () => { refreshFromDisk(false); refreshTitle(); },
     reloadCss: reloadCss,
     exported: (info) => toast(info.ok ? T('Exportado a {path}', { path: info.path }) : (info.cancelled ? T('Exportación cancelada') : T('No se pudo exportar') + (info.error ? ': ' + info.error : ''))),
   };

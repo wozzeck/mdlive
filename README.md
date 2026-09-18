@@ -6,7 +6,7 @@ Pensado para abrir un `.md` y verlo actualizarse al vuelo mientras lo editas con
 
 ## Características
 
-- **Live reload**: si el `.md` cambia en disco, la vista se refresca al instante (también recarga `style.css` e `index.html` en caliente).
+- **Live reload**: si el `.md` cambia en disco, la vista se refresca al instante (también recarga `style.css` e `index.html` en caliente). En modo edición, si no hay nada escrito sin guardar el editor adopta lo del disco sin molestar; si lo hay, avisa («el fichero ha cambiado fuera del editor») y deja elegir entre recargar o seguir editando, sin tocar el buffer mientras tanto.
 - **Título de la ventana**: `nombre.md - dd/mm/aaaa HH:MM - mdlive`, con la fecha de la última modificación del fichero; se actualiza al guardar desde el editor y cuando el `.md` cambia en disco.
 - **Edición WYSIWYG por bloques** (CodeMirror 6): todo el documento se ve renderizado salvo el bloque donde está el cursor (en una lista, solo su ítem), que se muestra como fuente y se resalta. Guarda directo al fichero. Si el bloque tiene saltos de línea que al leer no se ven (texto partido a mano), un botón en su esquina —o `Ctrl`+`J`— los quita. En las tablas, un clic sobre una celda edita solo esa celda (su fuente) con el resto de la tabla renderizado; `Tab` e `Intro` saltan de celda, y con el clic derecho (o la mini-barra que asoma sobre la tabla) se insertan, mueven y eliminan filas y columnas, se alinea la columna y se realinean los anchos de la fuente.
 - **Índice/árbol del documento**: panel lateral con la jerarquía de encabezados, colapsable, redimensionable y con *scroll-spy* (resalta el apartado visible), tanto en visor como en editor.
@@ -61,7 +61,7 @@ sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1
 | `Ctrl`+rueda | Zoom de solo texto |
 | `Ctrl`+`0` | Restablecer el zoom |
 | `Ctrl`+`H` | Ayuda con todos los atajos |
-| `Esc` | Cerrar la ayuda / salir del modo edición |
+| `Esc` | Cerrar lo que esté abierto (ayuda, menús, visor de imágenes, paneles laterales de uno en uno) y, cuando no queda nada, salir del modo edición |
 
 #### Formato (solo en modo edición)
 
